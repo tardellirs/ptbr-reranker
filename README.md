@@ -4,12 +4,12 @@
 
 **Cross-encoder reranker para português brasileiro, baseado em Albertina-100m e treinado em mMARCO-PT com hard negatives minerados.**
 
-[![CI](https://github.com/stekel/ptbr-reranker/actions/workflows/ci.yml/badge.svg)](https://github.com/stekel/ptbr-reranker/actions/workflows/ci.yml)
+[![CI](https://github.com/tardellirs/ptbr-reranker/actions/workflows/ci.yml/badge.svg)](https://github.com/tardellirs/ptbr-reranker/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Hugging Face Model](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Model-yellow)](https://huggingface.co/stekel/cross-encoder-albertina-ptbr-mmarco)
-[![Hugging Face Space](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Demo-blue)](https://huggingface.co/spaces/stekel/ptbr-reranker-demo)
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/stekel/ptbr-reranker/blob/main/examples/notebooks/quickstart.ipynb)
+[![Hugging Face Model](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Model-yellow)](https://huggingface.co/tardellirs/cross-encoder-albertina-ptbr-mmarco)
+[![Hugging Face Space](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Demo-blue)](https://huggingface.co/spaces/tardellirs/ptbr-reranker-demo)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/tardellirs/ptbr-reranker/blob/main/examples/notebooks/quickstart.ipynb)
 
 </div>
 
@@ -34,7 +34,7 @@ O ecossistema de IR para português brasileiro tem bi-encoders sólidos (Serafim
 ```python
 from sentence_transformers import CrossEncoder
 
-model = CrossEncoder("stekel/cross-encoder-albertina-ptbr-mmarco")
+model = CrossEncoder("tardellirs/cross-encoder-albertina-ptbr-mmarco")
 
 query = "qual é a capital do Brasil?"
 passages = [
@@ -59,7 +59,7 @@ Veja `examples/` para mais snippets:
 ```bash
 pip install ptbr-reranker
 # ou para desenvolvimento:
-git clone https://github.com/stekel/ptbr-reranker.git
+git clone https://github.com/tardellirs/ptbr-reranker.git
 cd ptbr-reranker
 pip install -e ".[dev]"
 pre-commit install
@@ -129,7 +129,7 @@ Detalhes em [`docs/quality-tests.md`](docs/quality-tests.md).
   author = {Stekel},
   title = {PTBR-Reranker: A Brazilian Portuguese Cross-Encoder for Passage Reranking},
   year = {2026},
-  url = {https://github.com/stekel/ptbr-reranker},
+  url = {https://github.com/tardellirs/ptbr-reranker},
   publisher = {Hugging Face}
 }
 ```

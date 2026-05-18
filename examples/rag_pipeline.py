@@ -10,7 +10,7 @@ import numpy as np
 from sentence_transformers import CrossEncoder, SentenceTransformer
 
 BI_ENCODER_ID = "PORTULAN/serafim-100m-portuguese-pt-sentence-encoder-ir"
-CROSS_ENCODER_ID = "stekel/cross-encoder-albertina-ptbr-mmarco"
+CROSS_ENCODER_ID = "tardellirs/cross-encoder-albertina-ptbr-mmarco"
 
 CORPUS = [
     "Brasília é a capital federal do Brasil desde 1960.",

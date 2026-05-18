@@ -61,10 +61,10 @@ demo = ["gradio>=4.40"]
 docs = ["mkdocs>=1.6", "mkdocs-material>=9.5"]
 
 [project.urls]
-Homepage = "https://github.com/stekel/ptbr-reranker"
-Repository = "https://github.com/stekel/ptbr-reranker"
-"Hugging Face" = "https://huggingface.co/stekel/cross-encoder-albertina-ptbr-mmarco"
-Issues = "https://github.com/stekel/ptbr-reranker/issues"
+Homepage = "https://github.com/tardellirs/ptbr-reranker"
+Repository = "https://github.com/tardellirs/ptbr-reranker"
+"Hugging Face" = "https://huggingface.co/tardellirs/cross-encoder-albertina-ptbr-mmarco"
+Issues = "https://github.com/tardellirs/ptbr-reranker/issues"
 
 [project.scripts]
 ptbr-rerank = "src.rerank:main"

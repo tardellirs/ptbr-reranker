@@ -73,7 +73,7 @@ def main() -> None:
         validate(args.path)
 
     if args.publish:
-        repo_id = os.environ.get("HF_REPO", "stekel/cross-encoder-albertina-ptbr-mmarco")
+        repo_id = os.environ.get("HF_REPO", "tardellirs/cross-encoder-albertina-ptbr-mmarco")
         token = os.environ.get("HF_TOKEN")
         if not token:
             sys.exit("HF_TOKEN environment variable is required to publish")

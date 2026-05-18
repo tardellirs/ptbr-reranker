@@ -6,8 +6,8 @@ authors:
   - given-names: "Stekel"
     affiliation: "Instituto Federal de São Paulo (IFSP)"
     email: stekel@ifsp.edu.br
-repository-code: "https://github.com/stekel/ptbr-reranker"
-url: "https://huggingface.co/stekel/cross-encoder-albertina-ptbr-mmarco"
+repository-code: "https://github.com/tardellirs/ptbr-reranker"
+url: "https://huggingface.co/tardellirs/cross-encoder-albertina-ptbr-mmarco"
 abstract: >-
   A cross-encoder reranker for Brazilian Portuguese based on the Albertina-100m
   encoder, trained on mMARCO-PT with mined hard negatives. Evaluated on

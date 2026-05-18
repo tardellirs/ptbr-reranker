@@ -1,6 +1,6 @@
 """Gradio demo Space for the PTBR-Reranker.
 
-Hosted at: https://huggingface.co/spaces/stekel/ptbr-reranker-demo
+Hosted at: https://huggingface.co/spaces/tardellirs/ptbr-reranker-demo
 """
 
 from __future__ import annotations
@@ -8,7 +8,7 @@ from __future__ import annotations
 import gradio as gr
 from sentence_transformers import CrossEncoder
 
-MODEL_ID = "stekel/cross-encoder-albertina-ptbr-mmarco"
+MODEL_ID = "tardellirs/cross-encoder-albertina-ptbr-mmarco"
 model = CrossEncoder(MODEL_ID)
 
 EXAMPLES: list[list[str]] = [

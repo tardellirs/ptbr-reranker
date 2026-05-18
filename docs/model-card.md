@@ -100,7 +100,7 @@ Statistical significance reported via paired bootstrap (n=1000) with 95% CIs.
 
 ## Quality testing
 
-This model has been evaluated on a structured battery covering calibration (ECE), robustness (accents, typos, case, abbreviations), bias (PT-BR vs PT-PT, demographic invariance), and curated qualitative PT-BR cases (legal, clinical, slang, polysemy, negation). See [`docs/quality-tests.md`](https://github.com/stekel/ptbr-reranker/blob/main/docs/quality-tests.md) for the full protocol.
+This model has been evaluated on a structured battery covering calibration (ECE), robustness (accents, typos, case, abbreviations), bias (PT-BR vs PT-PT, demographic invariance), and curated qualitative PT-BR cases (legal, clinical, slang, polysemy, negation). See [`docs/quality-tests.md`](https://github.com/tardellirs/ptbr-reranker/blob/main/docs/quality-tests.md) for the full protocol.
 
 ## Environmental impact
 
@@ -113,7 +113,7 @@ Trained on Runpod Community A100 SXM. Carbon emissions tracked with [`codecarbon
 ```python
 from sentence_transformers import CrossEncoder
 
-model = CrossEncoder("stekel/cross-encoder-albertina-ptbr-mmarco")
+model = CrossEncoder("tardellirs/cross-encoder-albertina-ptbr-mmarco")
 
 query = "qual é a capital do Brasil?"
 passages = [
@@ -130,7 +130,7 @@ scores = model.predict([(query, p) for p in passages])
   author = {Stekel},
   title = {PTBR-Reranker: A Brazilian Portuguese Cross-Encoder for Passage Reranking},
   year = {2026},
-  url = {https://github.com/stekel/ptbr-reranker},
+  url = {https://github.com/tardellirs/ptbr-reranker},
   publisher = {Hugging Face}
 }
 ```

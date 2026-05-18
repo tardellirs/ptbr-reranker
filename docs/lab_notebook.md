@@ -91,7 +91,43 @@ Princípio: se não está aqui, não aconteceu. O paper sai daqui.
 - Em Kaggle Kernel free: rodar `python data/download_mmarco.py --small` (CPU, free) → confirmar que o caminho funciona end-to-end com dados reais.
 - Implementar `data/mine_hard_negatives.py` (encoding com Serafim-IR + FAISS HNSW).
 - Criar conta W&B e projeto `ptbr-reranker`.
-- Decidir se hospedo o dataset de hard negatives como repo HF separado (`stekel/mmarco-ptbr-hardnegatives`).
+- Decidir se hospedo o dataset de hard negatives como repo HF separado (`tardellirs/mmarco-ptbr-hardnegatives`).
+
+---
+
+## 2026-05-18 — Notebook Kaggle de validação Phase 1 + renomeação de handles
+
+**Hipótese:** Para validar Phase 1 sem rodar nada localmente nem pagar GPU, vale criar um notebook Kaggle auto-suficiente que clona o repo, baixa dados (small), valida manifest, e roda o smoke test do Albertina em CPU.
+
+**O que fiz:**
+- Renomeei todas as URLs GitHub e repo IDs HF de `stekel/*` → `tardellirs/*` em 15 arquivos. Email institucional `stekel@ifsp.edu.br` mantido. Assumi também HF user = `tardellirs` (confirmar antes do primeiro push para HF Hub).
+- Criei `notebooks/kaggle_phase1_validation.ipynb` (8 células markdown + 7 código) com:
+  - Clone via `git clone --depth 1 https://github.com/tardellirs/ptbr-reranker.git`
+  - `pip install -e ".[dev]"`
+  - `python data/download_mmarco.py --small`
+  - Pretty-print do manifest.json
+  - `python data/download_mmarco.py --check --small` (exit code 0)
+  - Sanity dos parquets via pandas
+  - `pytest -v -m slow tests/test_data_pipeline.py::test_albertina_loads_and_predicts`
+  - Suite rápida (`pytest -m "not gpu and not slow"`) para regressão
+  - Inferência qualitativa com 3 passagens
+  - Checklist final + próximos passos
+- Criei `notebooks/README.md` com instruções de upload (Settings: Accelerator None, Internet On, Persistence Variables+files), tempo esperado (5–10min), output esperado, e o que fazer com os resultados.
+- Validei: notebook é JSON parseável; ruff/mypy/pytest tudo limpo (12 testes).
+- Pego: B905 (zip sem `strict=`) também aplica dentro de notebooks. Tive que usar `NotebookEdit` em vez de `Edit` para corrigir.
+
+**Resultado:**
+- Lint, format, mypy, pytest: ✅
+- 12 testes passando.
+
+**Decisão:**
+- O notebook só executa de fato após o push para GitHub público. Vou pedir autorização explícita do usuário antes do push, com comando `gh repo create` + `git push` documentado.
+- Confiar no Kaggle base image para ter torch/transformers/datasets já presentes — `pip install -e ".[dev]"` só adiciona pytest/ruff/mypy/codecarbon (rápido).
+
+**TODO próxima sessão:**
+- Push para GitHub público.
+- Subir o notebook no Kaggle, executar, registrar SHAs resolvidas em `docs/reproducibility.md`.
+- Confirmar HF username (`tardellirs`?) antes de criar repo no HF Hub.
 
 ---
 

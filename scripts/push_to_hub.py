@@ -74,7 +74,7 @@ def main() -> None:
     parser.add_argument("--metrics", type=Path, required=True, help="JSON file with eval metrics")
     parser.add_argument(
         "--repo-id",
-        default=os.environ.get("HF_REPO", "stekel/cross-encoder-albertina-ptbr-mmarco"),
+        default=os.environ.get("HF_REPO", "tardellirs/cross-encoder-albertina-ptbr-mmarco"),
     )
     parser.add_argument("--private", action="store_true")
     parser.add_argument("--message", default="Initial release")

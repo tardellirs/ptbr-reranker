@@ -32,5 +32,5 @@ jobs:
         if: github.ref == 'refs/heads/main'
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          HF_REPO: ${{ vars.HF_REPO || 'stekel/cross-encoder-albertina-ptbr-mmarco' }}
+          HF_REPO: ${{ vars.HF_REPO || 'tardellirs/cross-encoder-albertina-ptbr-mmarco' }}
         run: python scripts/build_modelcard.py --publish

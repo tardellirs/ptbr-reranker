@@ -6,7 +6,7 @@ from sentence_transformers import CrossEncoder
 
 
 def main() -> None:
-    model = CrossEncoder("stekel/cross-encoder-albertina-ptbr-mmarco")
+    model = CrossEncoder("tardellirs/cross-encoder-albertina-ptbr-mmarco")
 
     query = "qual é a capital do Brasil?"
     passages = [

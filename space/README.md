@@ -12,8 +12,8 @@ license: mit
 
 # PTBR-Reranker — Demo
 
-Interactive demo for [stekel/cross-encoder-albertina-ptbr-mmarco](https://huggingface.co/stekel/cross-encoder-albertina-ptbr-mmarco).
+Interactive demo for [tardellirs/cross-encoder-albertina-ptbr-mmarco](https://huggingface.co/tardellirs/cross-encoder-albertina-ptbr-mmarco).
 
 Paste a query and a list of passages (one per line); the model returns the passages reordered by relevance.
 
-Model and code: [github.com/stekel/ptbr-reranker](https://github.com/stekel/ptbr-reranker)
+Model and code: [github.com/tardellirs/ptbr-reranker](https://github.com/tardellirs/ptbr-reranker)

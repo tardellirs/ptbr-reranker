@@ -23,7 +23,7 @@ def checkpoint_path() -> str:
     """
     return os.environ.get(
         "PTBR_RERANKER_CHECKPOINT",
-        "stekel/cross-encoder-albertina-ptbr-mmarco",
+        "tardellirs/cross-encoder-albertina-ptbr-mmarco",
     )
 
 

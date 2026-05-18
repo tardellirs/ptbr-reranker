@@ -7,7 +7,7 @@ from pathlib import Path
 from sentence_transformers import CrossEncoder
 
 DEFAULT_BASE_MODEL = "PORTULAN/albertina-100m-portuguese-ptbr-encoder"
-DEFAULT_HF_HUB_ID = "stekel/cross-encoder-albertina-ptbr-mmarco"
+DEFAULT_HF_HUB_ID = "tardellirs/cross-encoder-albertina-ptbr-mmarco"
 
 
 def load(

@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - `data/download_mmarco.py` implemented end-to-end: pulls mMARCO Portuguese splits and MIRACL-PT from Hugging Face Datasets, persists parquet snapshots, records the HF revision SHA in a per-target manifest, and validates row counts in `--full` and `--small` modes.
 - Added `tests/test_data_pipeline.py` covering the manifest/validation logic (no network) and a slow-marked smoke test that loads Albertina-100m through `sentence_transformers.CrossEncoder` to confirm the model path before any training run.
+- Renamed all GitHub URLs and Hugging Face repo IDs from `stekel/*` to `tardellirs/*` to match the maintainer's actual handles. The institutional email `stekel@ifsp.edu.br` is unchanged.
+- Added `notebooks/kaggle_phase1_validation.ipynb` and `notebooks/README.md` — a free-tier Kaggle Kernel that clones the repo, runs the small-mode mMARCO-PT download, validates the manifest, and executes the slow-marked Albertina smoke test in CPU. Validates the entire Phase 1 pipeline without paid GPU.
 
 ## [0.1.0] - 2026-05-18
 

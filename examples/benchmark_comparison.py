@@ -9,7 +9,7 @@ from __future__ import annotations
 from sentence_transformers import CrossEncoder
 
 MODELS = {
-    "PTBR-Reranker (ours)": "stekel/cross-encoder-albertina-ptbr-mmarco",
+    "PTBR-Reranker (ours)": "tardellirs/cross-encoder-albertina-ptbr-mmarco",
     "BGE-reranker-v2-m3": "BAAI/bge-reranker-v2-m3",
     "mMiniLM-L12-v2-msmarco": "cross-encoder/msmarco-MiniLM-L12-en-de-v1",
 }
