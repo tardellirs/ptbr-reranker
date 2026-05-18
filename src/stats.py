@@ -6,6 +6,9 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 import numpy as np
+import numpy.typing as npt
+
+FloatArray = npt.NDArray[np.float64]
 
 
 @dataclass
@@ -27,7 +30,7 @@ class BootstrapResult:
 def bootstrap_metric(
     per_query_scores: Sequence[float],
     *,
-    metric_fn: Callable[[np.ndarray], float] = np.mean,
+    metric_fn: Callable[[FloatArray], float] = np.mean,
     n_resamples: int = 1000,
     confidence: float = 0.95,
     seed: int = 42,
