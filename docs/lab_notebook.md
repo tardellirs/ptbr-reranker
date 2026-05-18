@@ -131,6 +131,35 @@ Princípio: se não está aqui, não aconteceu. O paper sai daqui.
 
 ---
 
+## 2026-05-18 — Push para GitHub + ajustes de CI
+
+**Hipótese:** Pushar para `tardellirs/ptbr-reranker` público e deixar a primeira execução de CI verde.
+
+**O que fiz:**
+- `gh repo create tardellirs/ptbr-reranker --public --source=. --remote=origin --push` — repositório criado em https://github.com/tardellirs/ptbr-reranker com a descrição correta.
+- `gh repo edit` adicionou topics: `portuguese-nlp`, `brazilian-portuguese`, `cross-encoder`, `reranker`, `information-retrieval`, `sentence-transformers`, `huggingface`, `pt-br`, `nlp`, `albertina`. Homepage apontando para o futuro repo HF.
+- CI da primeira run falhou em **dois** pontos:
+  1. **Publish model card** falhou no step de upload porque `HF_TOKEN` secret ainda não existe. Movei o `env: HF_TOKEN: ${{ secrets.HF_TOKEN }}` do nível do step para o nível do job — antes o `if: env.HF_TOKEN != ''` não conseguia acessar o env definido no próprio step (chicken-and-egg). Agora o workflow emite notice e sai limpo quando falta token, em vez de falhar.
+  2. **mypy em Python 3.10** falhou: `src/stats.py:30: error: Missing type arguments for generic type "ndarray" [type-arg]`. Localmente passei porque uso 3.14, onde a regra é relaxada. Substituí `np.ndarray` bare por `FloatArray = npt.NDArray[np.float64]` (numpy.typing). Portável entre 3.10/3.11/3.12.
+- Pushei dois commits de fix; segunda CI run em andamento.
+
+**Resultado:**
+- Repositório público em https://github.com/tardellirs/ptbr-reranker.
+- 4 commits no histórico: scaffold inicial, validação local, downloader mMARCO, notebook Kaggle + renames.
+- Mais 2 commits de fix: `c0a8a9e` (CI publish) e `f0de6fe` (mypy 3.10).
+
+**Pegadas didáticas:**
+- `env:` em workflow definido no nível do step **não é** visível no `if:` do mesmo step. Tem que estar no nível do job ou workflow.
+- mypy em Python 3.10 ainda exige type args explícitos em `np.ndarray`. Em 3.12+ é relaxado. Usar `numpy.typing.NDArray[dtype]` resolve.
+- Matrix testing no CI (3.10 + 3.11 + 3.12) é o que pega esses problemas — se tivesse só uma versão local não veria.
+
+**TODO próxima sessão:**
+- Conferir que a segunda CI run passou nas 3 versões de Python (run id 26063071111).
+- Subir o notebook no Kaggle, rodar, atualizar `docs/reproducibility.md` com SHAs resolvidas.
+- Confirmar HF username e criar conta W&B.
+
+---
+
 <!-- Template para próximas entradas:
 
 ## YYYY-MM-DD — Título curto
