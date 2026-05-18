@@ -1,0 +1,53 @@
+# Main training config — Albertina-100m + hard negatives mined with Serafim-IR.
+# This is the production recipe for the released model.
+
+base_model: PORTULAN/albertina-100m-portuguese-ptbr-encoder
+
+# Data
+train_triples: data/processed/triples.parquet
+collection: data/raw/mmarco/collection.tsv
+
+# Hard negative mining (consumed by data/mine_hard_negatives.py)
+mining:
+  biencoder: PORTULAN/serafim-100m-portuguese-pt-sentence-encoder-ir
+  top_k: 200
+  num_negatives: 7
+  rank_min: 10
+  rank_max: 100
+  faiss_index_type: hnsw     # alternatives: flat, ivfpq
+  faiss_hnsw_m: 64
+  encode_batch_size: 256
+  seed: 42
+
+# Training
+num_epochs: 1
+batch_size: 32              # per-device
+grad_accum_steps: 2         # effective batch = 64
+learning_rate: 2.0e-5
+warmup_ratio: 0.1
+max_length: 256
+loss: cross_entropy_softmax # softmax over {positive, hard_negatives}
+
+# Optimization
+optimizer: adamw
+weight_decay: 0.01
+gradient_checkpointing: false
+mixed_precision: bf16
+
+# Reproducibility
+seed: 42
+
+# Logging / checkpointing
+output_dir: runs/hardneg
+eval_every_steps: 10000
+save_every_steps: 10000
+keep_top_k_checkpoints: 2
+log_every_steps: 50
+
+# Experiment tracking
+wandb_project: ptbr-reranker
+wandb_run_name: albertina100m-hardneg-v1
+wandb_tags: [main, hard-negatives, albertina-100m, serafim-mined]
+
+# CO2 tracking
+codecarbon_enabled: true

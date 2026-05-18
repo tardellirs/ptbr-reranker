@@ -1,0 +1,34 @@
+cff-version: 1.2.0
+title: "PTBR-Reranker: A Brazilian Portuguese Cross-Encoder for Passage Reranking"
+message: "If you use this software or model, please cite it using this metadata."
+type: software
+authors:
+  - given-names: "Stekel"
+    affiliation: "Instituto Federal de São Paulo (IFSP)"
+    email: stekel@ifsp.edu.br
+repository-code: "https://github.com/stekel/ptbr-reranker"
+url: "https://huggingface.co/stekel/cross-encoder-albertina-ptbr-mmarco"
+abstract: >-
+  A cross-encoder reranker for Brazilian Portuguese based on the Albertina-100m
+  encoder, trained on mMARCO-PT with mined hard negatives. Evaluated on
+  mMARCO-PT dev and MIRACL-PT with a comprehensive quality testing battery
+  covering calibration, robustness, bias, and qualitative cases specific to
+  Brazilian Portuguese.
+keywords:
+  - portuguese-nlp
+  - brazilian-portuguese
+  - cross-encoder
+  - reranker
+  - information-retrieval
+  - sentence-transformers
+license: MIT
+version: 0.1.0
+date-released: "2026-05-18"
+preferred-citation:
+  type: article
+  title: "PTBR-Reranker: A Brazilian Portuguese Cross-Encoder for Passage Reranking"
+  authors:
+    - given-names: "Stekel"
+      affiliation: "Instituto Federal de São Paulo (IFSP)"
+  year: 2026
+  status: "in-preparation"

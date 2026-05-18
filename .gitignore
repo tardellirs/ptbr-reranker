@@ -1,0 +1,97 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project artifacts
+runs/
+checkpoints/
+wandb/
+mlruns/
+outputs/
+emissions.csv
+.codecarbon.lock
+
+# Data (kept out of git; use HF Datasets / DVC)
+data/raw/
+data/processed/
+data/cache/
+data/*.parquet
+data/*.jsonl
+data/*.tsv.gz
+!data/README.md
+!data/*.py
+
+# Models (use HF Hub)
+models/
+*.bin
+*.safetensors
+*.pt
+*.ckpt
+
+# Test/coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Logs
+*.log
+
+# Paper artifacts
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/*.bbl
+paper/*.blg
+paper/*.synctex.gz
+paper/*.fdb_latexmk
+paper/*.fls
+paper/main.pdf
+
+# Secrets
+.env
+.env.local
+*.key
+secrets/
