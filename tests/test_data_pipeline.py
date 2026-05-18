@@ -134,14 +134,21 @@ def test_albertina_loads_and_predicts() -> None:
 
     Requires network (downloads ~400MB on first run). Marked slow so CI skips it
     by default; run locally with ``pytest -m slow`` to validate the model path.
+
+    We force float32 explicitly because some hosted environments (e.g. Kaggle
+    Kernels CPU base image) ship with torch defaults that load DeBERTa weights
+    in bfloat16, which then fail to matmul against float32 inputs in attention.
     """
+    import torch
     from sentence_transformers import CrossEncoder
 
     model = CrossEncoder(
         "PORTULAN/albertina-100m-portuguese-ptbr-encoder",
         num_labels=1,
         max_length=64,
+        model_kwargs={"torch_dtype": torch.float32},
     )
+    model.model.float()
     scores = model.predict(
         [
             ("qual a capital do Brasil?", "Brasília é a capital do Brasil."),
