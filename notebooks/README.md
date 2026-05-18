@@ -17,6 +17,29 @@ Valida o pipeline de Phase 1 sem custo de GPU paga, no free tier do Kaggle Kerne
 
 **Como subir no Kaggle:**
 
+### Via Kaggle CLI (recomendado para reprodutibilidade)
+
+```bash
+# 1) Autenticar (uma vez, token vem de https://www.kaggle.com/settings/account)
+mkdir -p ~/.kaggle && echo "$KAGGLE_API_TOKEN" > ~/.kaggle/access_token && chmod 600 ~/.kaggle/access_token
+
+# 2) Push do kernel
+kaggle kernels push -p notebooks/
+
+# 3) Acompanhar status até completar
+until kaggle kernels status tardellistekel/ptbr-reranker-phase-1-validation 2>&1 | grep -qE 'COMPLETE|ERROR'; do sleep 20; done
+
+# 4) Baixar output
+kaggle kernels output tardellistekel/ptbr-reranker-phase-1-validation -p /tmp/kaggle-output
+```
+
+`notebooks/kernel-metadata.json` configura:
+- Privado (`is_private: true`)
+- Internet habilitado (`enable_internet: true`)
+- CPU-only (`enable_gpu: false`)
+
+### Via interface web (alternativa)
+
 1. Acesse [kaggle.com/code](https://www.kaggle.com/code) e clique em **New Notebook**.
 2. No editor, **File → Import Notebook → Upload** e selecione `notebooks/kaggle_phase1_validation.ipynb`.
 3. Em **Settings** (painel direito):
