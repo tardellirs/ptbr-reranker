@@ -101,6 +101,7 @@ def build(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     writer: pq.ParquetWriter | None = None
     written = 0
+    dropped_unknown_ids = 0
     schema = pa.schema(
         [
             ("query_id", pa.int64()),
@@ -111,8 +112,9 @@ def build(
     )
 
     def _emit(qid: int, pos_id: int, neg_id: int) -> bool:
-        nonlocal writer, written
+        nonlocal writer, written, dropped_unknown_ids
         if qid not in query_text or pos_id not in passage_text or neg_id not in passage_text:
+            dropped_unknown_ids += 1
             return False
         row = {
             "query_id": qid,
@@ -163,7 +165,21 @@ def build(
         if writer is not None:
             writer.close()  # type: ignore[no-untyped-call]
 
-    logger.info("Wrote %d triples to %s", written, output_path)
+    logger.info(
+        "Wrote %d triples to %s (dropped %d rows whose ids were not in the "
+        "loaded queries/collection)",
+        written,
+        output_path,
+        dropped_unknown_ids,
+    )
+    if written == 0:
+        raise RuntimeError(
+            f"build_triples produced 0 rows (dropped {dropped_unknown_ids} due to "
+            "unknown ids). Check that --queries / --collection parquets cover the "
+            "ids referenced by the triples source. For --small mode + official "
+            "MS MARCO triples this is expected because the random ID sample rarely "
+            "intersects; mine triples on the small slice instead."
+        )
     return written
 
 
