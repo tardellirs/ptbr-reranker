@@ -160,6 +160,47 @@ Princípio: se não está aqui, não aconteceu. O paper sai daqui.
 
 ---
 
+## 2026-05-18 — Validação Phase 1 no Kaggle (4 tentativas)
+
+**Hipótese:** O notebook Kaggle clona o repo, baixa mMARCO-PT em modo `--small`, valida o manifest, roda o smoke test do Albertina, e completa em ~10min em CPU free.
+
+**O que fiz / quatro versões do kernel:**
+
+| Versão | Resultado | Erro |
+|---|---|---|
+| v1 | ERROR | `Could not resolve host: github.com` — telefone não verificado, internet bloqueada silenciosamente apesar de `enable_internet=true` na metadata. |
+| v2 | ERROR | Após verificar telefone: `RuntimeError: Dataset scripts are no longer supported, but found mmarco.py` — `datasets>=4.0` no Kaggle removeu suporte a loader scripts. |
+| v3 | ERROR | Após refatorar `download_mmarco.py` para usar `hf_hub_download` direto na revisão `refs/convert/parquet` (e descobrir que MIRACL não tem PT): download passou, mas smoke test do Albertina falhou com `expected m1 and m2 to have the same dtype, but got: float != c10::BFloat16` no DeBERTa attention — Kaggle CPU image carrega pesos em bfloat16 mas inputs vêm em float32. |
+| v4 | **COMPLETE** | Forçei `torch_dtype=torch.float32` + `.float()` no smoke test. Tudo passou. |
+
+**Resultado final (v4):**
+- mMARCO-PT `--small` baixado: 10000 + 1000 + 100 rows. SHA da revisão `d2da87d4433168219522a69ef38c30de16bbce80` (data.frame: `unicamp-dl/mmarco@refs/convert/parquet`).
+- Manifest validado (`All counts validated (small mode)`).
+- `pytest -m slow` (Albertina smoke): **1 passed** em 49.34s.
+- `pytest -m "not gpu and not slow"`: **12 passed**.
+- Inferência qualitativa: scores ~0.53 em todas as 3 passagens (esperado — modelo não fine-tuned, todos os pares retornam score similar; é o smoke test do pipeline, não validação de relevância).
+
+**Decisões importantes:**
+- MIRACL sai da lista de benchmarks de avaliação cross-domain. **Não existe MIRACL-PT** (idiomas: ar/bn/es/fa/fi/hi/id/ja/ko/sw/te/th/yo/zh). Preciso decidir alternativa em sessão futura.
+- Em ambiente Kaggle / Colab / qualquer GPU/CPU shared, **forçar float32 explicitamente** ao carregar modelos para evitar mixed-dtype issues. Vale também para o treino real (Phase 3) se rodar em ambientes onde o dtype default não é controlado.
+- SHA do mMARCO-PT registrada em `docs/reproducibility.md`. Quando rodar `--full`, re-resolver e atualizar.
+
+**Pegadas didáticas:**
+- Kaggle silenciosamente desabilita Internet em kernels de contas sem telefone verificado, mesmo com `enable_internet=true`. O sintoma é DNS failure (não erro 403).
+- `datasets>=4.0` removeu loader scripts. Datasets HF antigos (como mmarco) só funcionam via `refs/convert/parquet` agora.
+- Estratégia "bypassar load_dataset e ir direto no parquet auto-gerado" é mais robusta e fica imune a futuras quebras do `datasets` library.
+
+**Kernel público (para reprodução futura):**
+https://www.kaggle.com/code/tardellistekel/ptbr-reranker-phase-1-validation
+
+**TODO próxima sessão:**
+- Decidir avaliação cross-domain (alternativas a MIRACL: Mr.TyDi se tiver PT, ou criar BEIR-PT mini, ou usar BM25-vs-reranker em outro slice).
+- Phase 2: implementar `data/mine_hard_negatives.py` em GPU Kaggle T4×2 free.
+- Criar conta W&B e projeto `ptbr-reranker`.
+- Rotar token Kaggle (foi exposto na conversa).
+
+---
+
 <!-- Template para próximas entradas:
 
 ## YYYY-MM-DD — Título curto

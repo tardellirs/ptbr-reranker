@@ -55,6 +55,6 @@ To be filled at v1.0.0 release:
 - `torch`: TBD
 - CUDA: TBD
 - GPU: TBD
-- mMARCO-PT commit SHA: TBD
-- MIRACL commit SHA: TBD
+- mMARCO-PT commit SHA (refs/convert/parquet): `d2da87d4433168219522a69ef38c30de16bbce80` _(resolved 2026-05-18 in Phase 1 small-mode validation; will re-resolve before full-mode training)_
+- MIRACL commit SHA: N/A — MIRACL has no Portuguese subset. Cross-domain evaluation venue TBD.
 - Base model (Albertina-100m) commit SHA: TBD
