@@ -1,5 +1,5 @@
 {
-  "id": "tardellistekel/ptbr-reranker-phase-2-mining",
+  "id": "tardellistekel/ptbr-reranker-phase-2-hard-negative-mining",
   "title": "PTBR-Reranker — Phase 2 hard negative mining",
   "code_file": "kaggle_phase2_mining.ipynb",
   "language": "python",
