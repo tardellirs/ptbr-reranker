@@ -1,17 +1,25 @@
-"""Download mMARCO-PT and MIRACL-PT from Hugging Face Datasets.
+"""Download mMARCO-PT directly via Hugging Face Hub parquet snapshots.
 
-The mMARCO Portuguese subset comprises:
-- ``collections``: 8.8M passages translated to PT-BR.
-- ``queries``: 502,939 train queries + 6,980 dev queries, also translated.
-- ``qrels``: relevance judgements (binary) inherited from MS MARCO.
-- BM25 runs: top-1000 per query (used as candidates and as easy negatives).
+The ``unicamp-dl/mmarco`` dataset ships with a legacy loader script
+(``mmarco.py``), which was removed from upstream ``datasets`` at v4.0 for
+security reasons. We therefore bypass ``load_dataset`` and download the
+auto-converted parquet shards at ``refs/convert/parquet`` directly:
 
-We snapshot each split to a local parquet under ``data/raw/mmarco/`` and record
-the Hugging Face revision SHA in ``data/raw/mmarco/manifest.json`` for the
-ACL/NeurIPS-style reproducibility checklist.
+- ``collection-portuguese/mmarco-collection-{00000..00006}-of-00007.parquet``
+- ``queries-portuguese/train/0000.parquet``
+- ``queries-portuguese/dev/0000.parquet``
 
-For development on a laptop or in CI, use ``--small`` to materialize a
-~10k-passage / 100-query slice; full download is gated behind explicit flags.
+Each downloaded split is recorded in ``data/raw/mmarco/manifest.json`` along
+with the resolved revision SHA. The manifest is the artefact consumed by the
+ACL/NeurIPS-style reproducibility checklist (``docs/reproducibility.md``).
+
+MIRACL note: as of 2026-05, ``miracl/miracl`` has no Portuguese subset
+(`ar/bn/es/fa/fi/hi/id/ja/ko/sw/te/th/yo/zh`). MIRACL evaluation is therefore
+deferred; the cross-domain eval venue is a TODO captured in
+``docs/lab_notebook.md``.
+
+For development, use ``--small`` to materialize the first ~10k passages from
+the first collection shard plus a sample of train/dev queries.
 """
 
 from __future__ import annotations
@@ -28,17 +36,21 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 MMARCO_REPO = "unicamp-dl/mmarco"
-MMARCO_LANG = "portuguese"
-MIRACL_REPO = "miracl/miracl"
-MIRACL_LANG = "pt"
+MMARCO_PARQUET_REVISION = "refs/convert/parquet"
+COLLECTION_SHARDS = 7
+COLLECTION_PATH_TEMPLATE = (
+    "collection-portuguese/mmarco-collection-{shard:05d}-of-{total:05d}.parquet"
+)
+QUERIES_TRAIN_PATH = "queries-portuguese/train/0000.parquet"
+QUERIES_DEV_PATH = "queries-portuguese/dev/0000.parquet"
 
 DEFAULT_RAW_DIR = Path("data/raw")
 MANIFEST_NAME = "manifest.json"
 
 EXPECTED_COUNTS_FULL = {
     "collection": 8_841_823,
-    "queries_train": 502_939,
-    "queries_dev": 6_980,
+    "queries_train": 808_731,
+    "queries_dev": 101_093,
 }
 EXPECTED_COUNTS_SMALL = {
     "collection": 10_000,
@@ -63,23 +75,63 @@ def _now_iso() -> str:
     return datetime.now(tz=timezone.utc).isoformat(timespec="seconds")
 
 
-def _resolve_revision(repo_id: str) -> str | None:
-    """Resolve the current ``main`` commit SHA of an HF dataset (best-effort)."""
+def _resolve_revision(repo_id: str, revision: str) -> str | None:
+    """Resolve a ref like ``refs/convert/parquet`` to its commit SHA."""
     try:
         from huggingface_hub import HfApi
 
-        info = HfApi().dataset_info(repo_id=repo_id)
+        info = HfApi().dataset_info(repo_id=repo_id, revision=revision)
         return info.sha
     except Exception as exc:  # pragma: no cover - network failure path
-        logger.warning("Could not resolve revision for %s: %s", repo_id, exc)
+        logger.warning("Could not resolve revision for %s@%s: %s", repo_id, revision, exc)
         return None
 
 
-def _save_parquet(rows: Any, output_path: Path) -> int:
-    """Persist a `datasets.Dataset` to parquet and return the row count."""
+def _download_parquet(remote_path: str, revision: str) -> Path:
+    """Fetch a parquet file from HF Hub into the local cache."""
+    from huggingface_hub import hf_hub_download
+
+    cached = hf_hub_download(
+        repo_id=MMARCO_REPO,
+        filename=remote_path,
+        repo_type="dataset",
+        revision=revision,
+    )
+    return Path(cached)
+
+
+def _materialize(
+    remote_paths: list[str],
+    output_path: Path,
+    *,
+    revision: str,
+    row_limit: int | None,
+) -> int:
+    """Read one or more remote parquet shards, optionally truncate, and rewrite locally."""
+    import pyarrow.parquet as pq
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    rows.to_parquet(str(output_path))
-    return int(rows.num_rows)
+    rows_written = 0
+    writer: pq.ParquetWriter | None = None
+    try:
+        for remote_path in remote_paths:
+            local = _download_parquet(remote_path, revision)
+            parquet_file = pq.ParquetFile(local)  # type: ignore[no-untyped-call]
+            for batch in parquet_file.iter_batches(batch_size=2048):  # type: ignore[no-untyped-call]
+                if row_limit is not None and rows_written >= row_limit:
+                    break
+                if row_limit is not None and rows_written + batch.num_rows > row_limit:
+                    batch = batch.slice(0, row_limit - rows_written)
+                if writer is None:
+                    writer = pq.ParquetWriter(output_path, batch.schema)  # type: ignore[no-untyped-call]
+                writer.write_batch(batch)  # type: ignore[no-untyped-call]
+                rows_written += batch.num_rows
+            if row_limit is not None and rows_written >= row_limit:
+                break
+    finally:
+        if writer is not None:
+            writer.close()  # type: ignore[no-untyped-call]
+    return rows_written
 
 
 def download_mmarco(
@@ -91,72 +143,71 @@ def download_mmarco(
     """Download the mMARCO Portuguese collection, train queries, and dev queries.
 
     Args:
-        target_dir: Directory where ``mmarco/{collection,queries,qrels}.parquet`` land.
-        small: If True, slice each split to a development-sized sample.
-        revision: Pin to a specific HF revision SHA. ``None`` resolves to ``main``.
+        target_dir: Directory where parquet snapshots land under ``mmarco/``.
+        small: If True, truncate each split to a development sample.
+        revision: Pin to a specific commit SHA. Defaults to the current
+            ``refs/convert/parquet`` head.
     """
-    from datasets import load_dataset
-
     mmarco_dir = target_dir / "mmarco"
     mmarco_dir.mkdir(parents=True, exist_ok=True)
 
-    resolved_revision = revision or _resolve_revision(MMARCO_REPO)
+    resolved_revision = revision or _resolve_revision(MMARCO_REPO, MMARCO_PARQUET_REVISION)
+    if resolved_revision is None:
+        resolved_revision = MMARCO_PARQUET_REVISION
+
+    counts = EXPECTED_COUNTS_SMALL if small else EXPECTED_COUNTS_FULL
     snapshots: list[DatasetSnapshot] = []
 
-    splits = [
-        ("collection", "collection", MMARCO_LANG, EXPECTED_COUNTS_SMALL["collection"]),
-        ("queries", "queries", f"train.{MMARCO_LANG}", EXPECTED_COUNTS_SMALL["queries_train"]),
-        ("queries", "queries", f"dev.{MMARCO_LANG}", EXPECTED_COUNTS_SMALL["queries_dev"]),
+    plan = [
+        (
+            "collection",
+            "collection",
+            "portuguese",
+            [
+                COLLECTION_PATH_TEMPLATE.format(shard=i, total=COLLECTION_SHARDS)
+                for i in range(COLLECTION_SHARDS)
+            ],
+            counts["collection"] if small else None,
+            mmarco_dir / "collection_portuguese.parquet",
+        ),
+        (
+            "queries",
+            "queries",
+            "train.portuguese",
+            [QUERIES_TRAIN_PATH],
+            counts["queries_train"] if small else None,
+            mmarco_dir / "queries_train_portuguese.parquet",
+        ),
+        (
+            "queries",
+            "queries",
+            "dev.portuguese",
+            [QUERIES_DEV_PATH],
+            counts["queries_dev"] if small else None,
+            mmarco_dir / "queries_dev_portuguese.parquet",
+        ),
     ]
 
-    for label, config, split, small_n in splits:
-        logger.info("Loading %s/%s split=%s (small=%s)", MMARCO_REPO, config, split, small)
-        ds = load_dataset(MMARCO_REPO, config, split=split, revision=resolved_revision)
-        if small:
-            n = min(small_n, len(ds))
-            ds = ds.select(range(n))
-
-        filename = f"{label}_{split.replace('.', '_')}.parquet"
-        output_path = mmarco_dir / filename
-        num_rows = _save_parquet(ds, output_path)
+    for _label, config, split, remote_paths, row_limit, output_path in plan:
+        logger.info(
+            "Materializing %s/%s (split=%s, small=%s, limit=%s)",
+            MMARCO_REPO,
+            config,
+            split,
+            small,
+            row_limit,
+        )
+        num_rows = _materialize(
+            remote_paths,
+            output_path,
+            revision=resolved_revision,
+            row_limit=row_limit,
+        )
         logger.info("  → %s (%d rows)", output_path, num_rows)
         snapshots.append(
             DatasetSnapshot(
                 repo=MMARCO_REPO,
                 config=config,
-                split=split,
-                revision=resolved_revision,
-                num_rows=num_rows,
-                output_path=str(output_path.relative_to(target_dir.parent)),
-            )
-        )
-
-    return snapshots
-
-
-def download_miracl(
-    target_dir: Path,
-    *,
-    revision: str | None = None,
-) -> list[DatasetSnapshot]:
-    """Download MIRACL Portuguese dev split for cross-domain evaluation."""
-    from datasets import load_dataset
-
-    miracl_dir = target_dir / "miracl"
-    miracl_dir.mkdir(parents=True, exist_ok=True)
-    resolved_revision = revision or _resolve_revision(MIRACL_REPO)
-    snapshots: list[DatasetSnapshot] = []
-
-    for split in ("dev",):
-        logger.info("Loading %s/%s split=%s", MIRACL_REPO, MIRACL_LANG, split)
-        ds = load_dataset(MIRACL_REPO, MIRACL_LANG, split=split, revision=resolved_revision)
-        output_path = miracl_dir / f"queries_{split}.parquet"
-        num_rows = _save_parquet(ds, output_path)
-        logger.info("  → %s (%d rows)", output_path, num_rows)
-        snapshots.append(
-            DatasetSnapshot(
-                repo=MIRACL_REPO,
-                config=MIRACL_LANG,
                 split=split,
                 revision=resolved_revision,
                 num_rows=num_rows,
@@ -192,10 +243,7 @@ def write_manifest(
 
 
 def check(target_dir: Path, *, small: bool = False) -> bool:
-    """Validate that expected files exist and have plausible row counts.
-
-    Returns True if all checks pass; logs failures otherwise.
-    """
+    """Validate that expected files exist and have plausible row counts."""
     expected = EXPECTED_COUNTS_SMALL if small else EXPECTED_COUNTS_FULL
     manifest_path = target_dir / MANIFEST_NAME
     if not manifest_path.exists():
@@ -228,7 +276,6 @@ def check(target_dir: Path, *, small: bool = False) -> bool:
             logger.error("Missing count for %s", key)
             ok = False
             continue
-        # In full mode, expect exact counts; in small mode, expect <= the sample target.
         if small:
             if actual > expected_count:
                 logger.error("%s has %d rows, expected ≤ %d (small)", key, actual, expected_count)
@@ -244,7 +291,7 @@ def check(target_dir: Path, *, small: bool = False) -> bool:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Download mMARCO-PT and MIRACL-PT")
+    parser = argparse.ArgumentParser(description="Download mMARCO-PT")
     parser.add_argument("--target-dir", type=Path, default=DEFAULT_RAW_DIR)
     parser.add_argument(
         "--small",
@@ -252,12 +299,10 @@ def main() -> None:
         help="Download a small development slice (≈10k passages, 1k+100 queries).",
     )
     parser.add_argument(
-        "--mmarco-revision", default=None, help="Pin mMARCO to a specific revision SHA."
+        "--mmarco-revision",
+        default=None,
+        help="Pin mMARCO-PT to a specific revision SHA (default: latest refs/convert/parquet).",
     )
-    parser.add_argument(
-        "--miracl-revision", default=None, help="Pin MIRACL to a specific revision SHA."
-    )
-    parser.add_argument("--skip-miracl", action="store_true")
     parser.add_argument(
         "--check", action="store_true", help="Validate existing data without downloading."
     )
@@ -273,13 +318,7 @@ def main() -> None:
         ok = check(args.target_dir, small=args.small)
         sys.exit(0 if ok else 1)
 
-    snapshots: list[DatasetSnapshot] = []
-    snapshots.extend(
-        download_mmarco(args.target_dir, small=args.small, revision=args.mmarco_revision)
-    )
-    if not args.skip_miracl:
-        snapshots.extend(download_miracl(args.target_dir, revision=args.miracl_revision))
-
+    snapshots = download_mmarco(args.target_dir, small=args.small, revision=args.mmarco_revision)
     write_manifest(args.target_dir, snapshots, small=args.small)
     check(args.target_dir, small=args.small)
 

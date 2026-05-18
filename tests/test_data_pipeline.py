@@ -21,8 +21,8 @@ def _build_snapshots(target_dir: Path, *, small: bool) -> list[DatasetSnapshot]:
         if small
         else {
             "collection": 8_841_823,
-            "queries_train": 502_939,
-            "queries_dev": 6_980,
+            "queries_train": 808_731,
+            "queries_dev": 101_093,
         }
     )
     mmarco = target_dir / "mmarco"
@@ -35,7 +35,12 @@ def _build_snapshots(target_dir: Path, *, small: bool) -> list[DatasetSnapshot]:
     ]
     snapshots: list[DatasetSnapshot] = []
     for label, config, split, num_rows in splits:
-        filename = f"{label}_{split.replace('.', '_')}.parquet"
+        if label == "collection":
+            filename = "collection_portuguese.parquet"
+        elif "train" in split:
+            filename = "queries_train_portuguese.parquet"
+        else:
+            filename = "queries_dev_portuguese.parquet"
         path = mmarco / filename
         path.write_bytes(b"")
         snapshots.append(
@@ -71,7 +76,6 @@ def test_check_fails_when_snapshot_file_is_missing(tmp_path: Path) -> None:
     target.mkdir()
     snapshots = _build_snapshots(target, small=True)
     write_manifest(target, snapshots, small=True)
-    # Delete one of the snapshot files.
     (target / "mmarco" / "collection_portuguese.parquet").unlink()
 
     assert check(target, small=True) is False
@@ -81,7 +85,6 @@ def test_check_fails_when_small_count_exceeds_target(tmp_path: Path) -> None:
     target = tmp_path / "raw"
     target.mkdir()
     snapshots = _build_snapshots(target, small=True)
-    # Inflate the collection count beyond the small-mode bound.
     snapshots[0] = DatasetSnapshot(
         repo=snapshots[0].repo,
         config=snapshots[0].config,
@@ -99,7 +102,6 @@ def test_check_fails_when_full_count_mismatch(tmp_path: Path) -> None:
     target = tmp_path / "raw"
     target.mkdir()
     snapshots = _build_snapshots(target, small=False)
-    # Tweak the queries_dev count off by 1.
     snapshots[2] = DatasetSnapshot(
         repo=snapshots[2].repo,
         config=snapshots[2].config,
@@ -147,5 +149,4 @@ def test_albertina_loads_and_predicts() -> None:
         ]
     )
     assert len(scores) == 2
-    # We are not fine-tuned yet, so just verify the model runs end-to-end.
     assert all(isinstance(float(s), float) for s in scores)
