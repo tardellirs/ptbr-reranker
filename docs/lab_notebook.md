@@ -61,6 +61,40 @@ Princípio: se não está aqui, não aconteceu. O paper sai daqui.
 
 ---
 
+## 2026-05-18 — `download_mmarco.py` implementado + smoke test do Albertina
+
+**Hipótese:** Para validar Phase 1 sem queimar tempo de GPU paga, preciso de (a) um downloader real do mMARCO-PT que suporte modo `--small` para iteração local/CI e (b) um smoke test que garanta que o caminho `Albertina-100m → CrossEncoder → predict` funciona em CPU.
+
+**O que fiz:**
+- Implementei `data/download_mmarco.py` completo:
+  - `download_mmarco()` carrega `unicamp-dl/mmarco` via `datasets.load_dataset` para 3 splits (collection, queries-train, queries-dev), serializa para parquet em `data/raw/mmarco/`, registra revisão (SHA HF) em `manifest.json`.
+  - `download_miracl()` faz o mesmo para `miracl/miracl` (config `pt`).
+  - `check()` valida contagens esperadas (com semântica diferente para `--small` vs `--full`).
+  - `write_manifest()` é append-only para preservar histórico de downloads.
+  - Flag `--small` materializa slice de ~10k passagens + 1k train + 100 dev (cabe em laptop e em Kaggle Kernel free).
+  - Constantes `EXPECTED_COUNTS_FULL = {8_841_823, 502_939, 6_980}` e `EXPECTED_COUNTS_SMALL` documentadas no topo do módulo.
+- Adicionei 6 testes em `tests/test_data_pipeline.py` cobrindo manifest válido, manifest ausente, arquivo de snapshot ausente, contagem inflada em small mode, mismatch em full mode, e append múltiplo. Tudo com `tmp_path`, zero rede.
+- Adicionei smoke test `test_albertina_loads_and_predicts` em `tests/test_data_pipeline.py`, marcado `@pytest.mark.slow`. Carrega `PORTULAN/albertina-100m-portuguese-ptbr-encoder` via CrossEncoder e scoreia 2 pares — confirma que o modelo base é carregável e produz floats antes de qualquer fine-tuning. CI básico (sem `-m slow`) pula automaticamente.
+
+**Resultado:**
+- 12 testes passando (6 novos), 0 falhas.
+- Cobertura `data/download_mmarco.py`: 58% (toda a lógica sem rede coberta).
+- mypy `--strict` continua limpo em 11 arquivos fonte.
+- ruff lint + format limpos.
+
+**Decisão:**
+- Não rodar `download_mmarco` em CI nem agora — espera-se o primeiro download real no Kaggle Kernel da próxima sessão (free tier, sem custo).
+- Manter o smoke test `slow` no repositório como gate manual antes do primeiro treino: `pytest -m slow tests/test_data_pipeline.py::test_albertina_loads_and_predicts` deve passar antes de subir ao Runpod.
+- Manifest com SHA HF embutido é o artifact que vai para `docs/reproducibility.md` "Exact versions used in published model" no momento do release.
+
+**TODO próxima sessão:**
+- Em Kaggle Kernel free: rodar `python data/download_mmarco.py --small` (CPU, free) → confirmar que o caminho funciona end-to-end com dados reais.
+- Implementar `data/mine_hard_negatives.py` (encoding com Serafim-IR + FAISS HNSW).
+- Criar conta W&B e projeto `ptbr-reranker`.
+- Decidir se hospedo o dataset de hard negatives como repo HF separado (`stekel/mmarco-ptbr-hardnegatives`).
+
+---
+
 <!-- Template para próximas entradas:
 
 ## YYYY-MM-DD — Título curto
