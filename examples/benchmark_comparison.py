@@ -42,9 +42,7 @@ def main() -> None:
         model = CrossEncoder(model_id)
         for case in CASES:
             scores = model.predict([(case["query"], p) for p in case["passages"]])
-            ranking = sorted(
-                enumerate(scores.tolist()), key=lambda x: -x[1]
-            )
+            ranking = sorted(enumerate(scores.tolist()), key=lambda x: -x[1])
             top_idx = ranking[0][0]
             hit = "✓" if top_idx == case["relevant_index"] else "✗"
             print(f"  [{hit}] {case['query'][:60]}")

@@ -71,9 +71,7 @@ def push(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Push trained model to Hugging Face Hub")
     parser.add_argument("--checkpoint", type=Path, required=True)
-    parser.add_argument(
-        "--metrics", type=Path, required=True, help="JSON file with eval metrics"
-    )
+    parser.add_argument("--metrics", type=Path, required=True, help="JSON file with eval metrics")
     parser.add_argument(
         "--repo-id",
         default=os.environ.get("HF_REPO", "stekel/cross-encoder-albertina-ptbr-mmarco"),

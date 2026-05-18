@@ -26,7 +26,8 @@ def load(
     Returns:
         A configured ``CrossEncoder`` ready for ``predict``.
     """
-    return CrossEncoder(str(checkpoint), max_length=max_length, device=device)
+    model: CrossEncoder = CrossEncoder(str(checkpoint), max_length=max_length, device=device)
+    return model
 
 
 def load_base(
@@ -36,4 +37,5 @@ def load_base(
     max_length: int = 256,
 ) -> CrossEncoder:
     """Initialize a fresh cross-encoder from a foundation encoder (for training)."""
-    return CrossEncoder(base_model, num_labels=num_labels, max_length=max_length)
+    model: CrossEncoder = CrossEncoder(base_model, num_labels=num_labels, max_length=max_length)
+    return model

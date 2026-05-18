@@ -31,18 +31,14 @@ def build(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build training triples")
     parser.add_argument("--queries", type=Path, default=Path("data/raw/mmarco/queries.train.tsv"))
-    parser.add_argument(
-        "--collection", type=Path, default=Path("data/raw/mmarco/collection.tsv")
-    )
+    parser.add_argument("--collection", type=Path, default=Path("data/raw/mmarco/collection.tsv"))
     parser.add_argument("--qrels", type=Path, default=Path("data/raw/mmarco/qrels.train.tsv"))
     parser.add_argument(
         "--hard-negatives", type=Path, default=Path("data/processed/hard_negatives.parquet")
     )
     parser.add_argument("--bm25-negatives", type=Path, default=None)
     parser.add_argument("--mix-ratio-bm25", type=float, default=0.0)
-    parser.add_argument(
-        "--output", type=Path, default=Path("data/processed/triples.parquet")
-    )
+    parser.add_argument("--output", type=Path, default=Path("data/processed/triples.parquet"))
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 

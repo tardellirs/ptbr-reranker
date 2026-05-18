@@ -47,7 +47,9 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.passages_file:
-        passages = [line.strip() for line in args.passages_file.read_text().splitlines() if line.strip()]
+        passages = [
+            line.strip() for line in args.passages_file.read_text().splitlines() if line.strip()
+        ]
     else:
         passages = [line.strip() for line in sys.stdin if line.strip()]
 
@@ -63,7 +65,11 @@ def main() -> None:
     )
 
     if args.json:
-        print(json.dumps([{"passage": p, "score": s} for p, s in ranked], ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                [{"passage": p, "score": s} for p, s in ranked], ensure_ascii=False, indent=2
+            )
+        )
     else:
         for passage, score in ranked:
             print(f"{score:.4f}\t{passage}")

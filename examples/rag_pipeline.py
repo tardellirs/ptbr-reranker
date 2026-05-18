@@ -44,10 +44,8 @@ def main() -> None:
         print(f"  {rank}. [{score:+.3f}] {passage}")
 
     reranked_scores = cross.predict([(query, p) for p in candidates])
-    reranked = sorted(
-        zip(candidates, reranked_scores.tolist(), strict=True), key=lambda x: -x[1]
-    )
-    print(f"\n=== Reranked by PTBR-Reranker ===")
+    reranked = sorted(zip(candidates, reranked_scores.tolist(), strict=True), key=lambda x: -x[1])
+    print("\n=== Reranked by PTBR-Reranker ===")
     for rank, (passage, score) in enumerate(reranked, start=1):
         print(f"  {rank}. [{score:+.3f}] {passage}")
 
