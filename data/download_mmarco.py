@@ -351,11 +351,14 @@ def check(target_dir: Path, *, small: bool = False) -> bool:
         if not path.exists():
             logger.error("Missing snapshot file: %s", path)
             return False
+        # Only the parquet snapshots from refs/convert/parquet count toward
+        # the row-count budget. qrels and triples (TSVs on main) are tracked
+        # in the manifest for reproducibility but use their own size schema.
         if snap["config"] == "collection":
             counts["collection"] = snap["num_rows"]
-        elif "train" in snap["split"]:
+        elif snap["config"] == "queries" and "train" in snap["split"]:
             counts["queries_train"] = snap["num_rows"]
-        elif "dev" in snap["split"]:
+        elif snap["config"] == "queries" and "dev" in snap["split"]:
             counts["queries_dev"] = snap["num_rows"]
 
     ok = True

@@ -65,6 +65,31 @@ class MiningConfig:
             )
 
 
+def resolve_device(requested: str | None) -> str:
+    """Pick a torch device that is actually usable by the current install.
+
+    Some hosted environments (e.g. Kaggle's P100 instances paired with newer
+    PyTorch builds compiled only for sm_70+) advertise CUDA as available but
+    will then raise ``CUDA error: no kernel image is available for execution``
+    on the first kernel launch. We do a tiny probe to detect that situation
+    and fall back to CPU.
+    """
+    import torch
+
+    if requested == "cpu":
+        return "cpu"
+    if requested and requested != "auto":
+        return requested
+    if not torch.cuda.is_available():
+        return "cpu"
+    try:
+        _ = (torch.zeros(1, device="cuda") + 1).cpu()
+        return "cuda"
+    except Exception as exc:  # pragma: no cover - environment-specific
+        logger.warning("CUDA advertised but unusable (%s); falling back to CPU.", exc)
+        return "cpu"
+
+
 def _load_collection(collection_path: Path) -> tuple[np.ndarray, list[str]]:
     """Return (passage_ids, passage_texts) preserving file order.
 
@@ -167,6 +192,9 @@ def mine(
 
     rng = random.Random(config.seed)
 
+    resolved_device = resolve_device(device)
+    logger.info("Resolved device: %s (requested=%s)", resolved_device, device)
+
     pid_by_row, passage_texts = _load_collection(collection_path)
     qid_by_row, query_texts = _load_queries(queries_path)
     qrels = _load_qrels(qrels_path)
@@ -176,12 +204,12 @@ def mine(
         config.biencoder,
         passage_texts,
         batch_size=config.encode_batch_size,
-        device=device,
+        device=resolved_device,
     )
     index = build_index(passage_emb, index_type=index_type)
 
     logger.info("Encoding queries")
-    model = SentenceTransformer(config.biencoder, device=device)
+    model = SentenceTransformer(config.biencoder, device=resolved_device)
     query_emb = model.encode(
         query_texts,
         batch_size=config.encode_batch_size,
@@ -278,7 +306,11 @@ def main() -> None:
     parser.add_argument("--rank-max", type=int, default=DEFAULT_RANK_MAX)
     parser.add_argument("--encode-batch-size", type=int, default=DEFAULT_ENCODE_BATCH_SIZE)
     parser.add_argument("--index-type", default="hnsw", choices=["hnsw", "flat"])
-    parser.add_argument("--device", default=None, help="torch device (cuda, mps, cpu)")
+    parser.add_argument(
+        "--device",
+        default="auto",
+        help="torch device. 'auto' probes CUDA and falls back to CPU on incompatibility.",
+    )
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
