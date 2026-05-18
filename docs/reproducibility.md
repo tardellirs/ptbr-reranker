@@ -56,5 +56,6 @@ To be filled at v1.0.0 release:
 - CUDA: TBD
 - GPU: TBD
 - mMARCO-PT commit SHA (refs/convert/parquet): `d2da87d4433168219522a69ef38c30de16bbce80` _(resolved 2026-05-18 in Phase 1 small-mode validation; will re-resolve before full-mode training)_
-- MIRACL commit SHA: N/A — MIRACL has no Portuguese subset. Cross-domain evaluation venue TBD.
+- Quati commit SHA: TBD (cross-domain primary; `unicamp-dl/quati`)
+- JurisTCU commit SHA: TBD (cross-domain legal probe; `LeandroRibeiro/JurisTCU`)
 - Base model (Albertina-100m) commit SHA: TBD

@@ -34,6 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Smoke test `test_albertina_loads_and_predicts` now pins `torch_dtype=float32` to work around Kaggle CPU image's bfloat16 default that mixes badly with float32 inputs in DeBERTa attention.
 - Removed MIRACL from the pipeline: `miracl/miracl` has no Portuguese subset. Cross-domain evaluation venue captured as a TODO in `docs/lab_notebook.md`.
 - Recorded resolved mMARCO-PT revision SHA in `docs/reproducibility.md`.
+- Pivoted cross-domain evaluation: MIRACL has no PT subset, replaced with Quati (`unicamp-dl/quati`, native PT-BR web from ClueWeb22-pt, primary) and JurisTCU (`LeandroRibeiro/JurisTCU`, Brazilian legal jurisprudence, domain-shift probe). Renamed `src/eval_miracl.py` → `src/eval_quati.py` (git mv preserves history) and added `src/eval_juristcu.py`.
+- Phase 2 implementation (Tier 2): `data/mine_hard_negatives.py` now functional — Serafim-IR encoding, FAISS HNSW index, top-K search, qrels filtering, rank-windowed sampling, parquet output.
+- `data/build_triples.py` functional — consumes (a) the official MS MARCO `triples.train.ids.small.tsv` (39M BM25-mined triples, our baseline) and/or (b) mined hard negatives from Phase 2, weighted via `mix_ratio_official`. Outputs full text triples ready for `src/train.py`.
+- `data/download_mmarco.py` extended to pull qrels (`data/qrels.dev.small.tsv`) and the official training triples from the mMARCO main branch (TSV, language-agnostic, IDs shared across translations).
+- Bibliography updated with Quati (arXiv:2404.06976) and JurisTCU (arXiv:2503.08379) entries.
 
 ## [0.1.0] - 2026-05-18
 

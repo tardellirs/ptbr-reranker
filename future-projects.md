@@ -25,7 +25,7 @@ Gervásio (8B/70B), Tucano, Sabiá / Sabiá-2 / Sabiá-3 (Maritaca), Cabrita, Te
 
 1. **Não existe embedding model PT baseado em LLM (classe 7B+).** Em inglês isso é mainstream desde 2024 (E5-Mistral-7B, GritLM-7B, NV-Embed-v2, LLM2Vec — consistentemente topam o MTEB). Em PT, **tudo é encoder-only sub-1B**.
 2. **Não existe modelo PT com long-context.** Todos travam em 128–512 tokens. Em inglês temos BGE-M3 e Jina-v3 até 8192. Para RAG sério (jurídico, médico, acadêmico) isso é inviabilizante.
-3. **Não existe BEIR-PT.** Só temos mMARCO, que é traduzido do inglês com queries sobre tópicos em inglês. Holandês tem BEIR-NL (2025), polonês tem BEIR-PL, português não.
+3. **Não existe BEIR-PT** consolidado. Só temos mMARCO (traduzido), Quati (50 queries, native web) e JurisTCU (150 queries, legal). Holandês tem BEIR-NL (2025), polonês tem BEIR-PL — PT-BR ainda é um espaço aberto para contribuição de benchmark.
 4. **Não existe cross-encoder / reranker PT** de qualidade. A pipeline de duas etapas (retriever + reranker) está incompleta para PT.
 5. **Não existe IR sentence encoder PT-BR dedicado.** Serafim-IR é PT-PT.
 6. **MTEB-PT não está consolidado** — sem leaderboard de referência integrado para PT.

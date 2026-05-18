@@ -1,19 +1,36 @@
 """Mine hard negatives for training using the Serafim-IR bi-encoder.
 
-Pipeline:
-1. Encode the mMARCO-PT collection with Serafim-100m-IR.
-2. Index with FAISS (HNSW for speed; flat for exactness in a smaller subset).
-3. For each training query, retrieve top-K candidates.
-4. Remove positives (from qrels).
-5. Sample N hard negatives from ranks 10-100 (avoids false negatives at top ranks).
-6. Save (query_id, positive_id, [negative_id_1, ..., negative_id_N]) triples.
+Pipeline (canonical ANCE-style hard negative mining, adapted for PT-BR):
+
+1. Encode the mMARCO-PT collection (8.8M passages) with
+   ``PORTULAN/serafim-100m-portuguese-pt-sentence-encoder-ir`` in batches.
+2. Index the embeddings with FAISS (HNSW for speed on CPU; flat for exactness
+   on a smaller subset).
+3. Encode each training query and retrieve the top-K candidates.
+4. Remove known positives via the qrels file.
+5. Sample ``num_negatives`` hard negatives uniformly from ranks
+   ``rank_min`` .. ``rank_max``. The lower bound avoids false negatives at the
+   very top; the upper bound keeps the negatives reasonably hard.
+6. Write ``(query_id, positive_id, [neg_id_1, ..., neg_id_N])`` rows to parquet.
+
+Designed to run on a single mid-tier GPU. Estimated cost on Runpod A40
+($0.49/h): ~6 hours for the full mMARCO-PT (~$3); ~30 minutes for
+``--small`` mode (used to validate the pipeline on Kaggle T4x2 free tier).
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
+import random
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+import numpy as np
+
+if TYPE_CHECKING:
+    import faiss
 
 logger = logging.getLogger(__name__)
 
@@ -22,46 +39,236 @@ DEFAULT_TOP_K = 200
 DEFAULT_NUM_NEGATIVES = 7
 DEFAULT_RANK_MIN = 10
 DEFAULT_RANK_MAX = 100
+DEFAULT_ENCODE_BATCH_SIZE = 256
+
+
+@dataclass
+class MiningConfig:
+    biencoder: str = DEFAULT_BIENCODER
+    top_k: int = DEFAULT_TOP_K
+    num_negatives: int = DEFAULT_NUM_NEGATIVES
+    rank_min: int = DEFAULT_RANK_MIN
+    rank_max: int = DEFAULT_RANK_MAX
+    encode_batch_size: int = DEFAULT_ENCODE_BATCH_SIZE
+    seed: int = 42
+
+    def __post_init__(self) -> None:
+        if not 0 <= self.rank_min < self.rank_max <= self.top_k:
+            raise ValueError(
+                f"Require 0 <= rank_min ({self.rank_min}) < rank_max "
+                f"({self.rank_max}) <= top_k ({self.top_k})."
+            )
+        if self.num_negatives > (self.rank_max - self.rank_min):
+            raise ValueError(
+                f"num_negatives ({self.num_negatives}) must fit in "
+                f"[rank_min, rank_max) of size {self.rank_max - self.rank_min}."
+            )
+
+
+def _load_collection(collection_path: Path) -> tuple[np.ndarray, list[str]]:
+    """Return (passage_ids, passage_texts) preserving file order.
+
+    The order matters: row index in the FAISS index maps back to the passage_id
+    via the returned arrays.
+    """
+    import pyarrow.parquet as pq
+
+    table = pq.read_table(collection_path)  # type: ignore[no-untyped-call]
+    ids = table["id"].to_numpy()
+    texts = table["text"].to_pylist()
+    logger.info("Loaded %d passages from %s", len(ids), collection_path)
+    return ids, texts
+
+
+def _load_queries(queries_path: Path) -> tuple[np.ndarray, list[str]]:
+    """Return (query_ids, query_texts) preserving file order."""
+    import pyarrow.parquet as pq
+
+    table = pq.read_table(queries_path)  # type: ignore[no-untyped-call]
+    ids = table["id"].to_numpy()
+    texts = table["text"].to_pylist()
+    logger.info("Loaded %d queries from %s", len(ids), queries_path)
+    return ids, texts
+
+
+def _load_qrels(qrels_path: Path) -> dict[int, set[int]]:
+    """Parse a MS MARCO-style qrels TSV file: ``query_id 0 passage_id 1``.
+
+    Returns a dict mapping query_id -> set of positive passage_ids.
+    """
+    qrels: dict[int, set[int]] = {}
+    with qrels_path.open() as fh:
+        for line in fh:
+            parts = line.strip().split()
+            if len(parts) != 4:
+                continue
+            qid, _, pid, _ = parts
+            qrels.setdefault(int(qid), set()).add(int(pid))
+    logger.info("Loaded qrels for %d queries from %s", len(qrels), qrels_path)
+    return qrels
 
 
 def encode_collection(
     biencoder: str,
-    collection_path: Path,
-    output_path: Path,
+    texts: list[str],
     *,
-    batch_size: int = 256,
-) -> None:
-    """Encode passages with the bi-encoder and save embeddings."""
-    raise NotImplementedError("encode_collection() to be implemented in Phase 2")
+    batch_size: int = DEFAULT_ENCODE_BATCH_SIZE,
+    device: str | None = None,
+) -> np.ndarray:
+    """Encode passages with the bi-encoder. Returns ``(N, dim)`` float32 array."""
+    from sentence_transformers import SentenceTransformer
+
+    model = SentenceTransformer(biencoder, device=device)
+    embeddings = model.encode(
+        texts,
+        batch_size=batch_size,
+        normalize_embeddings=True,
+        convert_to_numpy=True,
+        show_progress_bar=True,
+    )
+    return np.asarray(embeddings, dtype=np.float32)
 
 
-def build_index(embeddings_path: Path, index_path: Path, *, index_type: str = "hnsw") -> None:
-    """Build a FAISS index from embeddings."""
-    raise NotImplementedError("build_index() to be implemented in Phase 2")
+def build_index(embeddings: np.ndarray, *, index_type: str = "hnsw") -> faiss.Index:
+    """Build a FAISS index over normalized embeddings (inner product = cosine)."""
+    import faiss
+
+    dim = embeddings.shape[1]
+    if index_type == "hnsw":
+        index = faiss.IndexHNSWFlat(dim, 64, faiss.METRIC_INNER_PRODUCT)
+        index.hnsw.efConstruction = 200
+        index.hnsw.efSearch = 128
+    elif index_type == "flat":
+        index = faiss.IndexFlatIP(dim)
+    else:
+        raise ValueError(f"Unknown index_type: {index_type}")
+    index.add(embeddings)
+    logger.info("Built %s index with %d vectors (dim=%d)", index_type, index.ntotal, dim)
+    return index
 
 
 def mine(
+    config: MiningConfig,
     queries_path: Path,
     qrels_path: Path,
-    index_path: Path,
+    collection_path: Path,
     output_path: Path,
     *,
-    top_k: int = DEFAULT_TOP_K,
-    num_negatives: int = DEFAULT_NUM_NEGATIVES,
-    rank_min: int = DEFAULT_RANK_MIN,
-    rank_max: int = DEFAULT_RANK_MAX,
-    seed: int = 42,
-) -> None:
-    """Mine hard negatives and write the resulting triples to parquet."""
-    raise NotImplementedError("mine() to be implemented in Phase 2")
+    index_type: str = "hnsw",
+    device: str | None = None,
+) -> int:
+    """Mine hard negatives and write triples to parquet.
+
+    Returns the number of (query, positive, negatives) rows written.
+    """
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    from sentence_transformers import SentenceTransformer
+
+    rng = random.Random(config.seed)
+
+    pid_by_row, passage_texts = _load_collection(collection_path)
+    qid_by_row, query_texts = _load_queries(queries_path)
+    qrels = _load_qrels(qrels_path)
+
+    logger.info("Encoding collection with %s", config.biencoder)
+    passage_emb = encode_collection(
+        config.biencoder,
+        passage_texts,
+        batch_size=config.encode_batch_size,
+        device=device,
+    )
+    index = build_index(passage_emb, index_type=index_type)
+
+    logger.info("Encoding queries")
+    model = SentenceTransformer(config.biencoder, device=device)
+    query_emb = model.encode(
+        query_texts,
+        batch_size=config.encode_batch_size,
+        normalize_embeddings=True,
+        convert_to_numpy=True,
+        show_progress_bar=True,
+    ).astype(np.float32)
+
+    logger.info("Searching top-%d for %d queries", config.top_k, len(query_texts))
+    _, neighbor_rows = index.search(query_emb, config.top_k)
+
+    rows_out: list[dict[str, object]] = []
+    skipped_no_qrel = 0
+    skipped_insufficient_pool = 0
+
+    for q_idx, qid in enumerate(qid_by_row.tolist()):
+        positives = qrels.get(int(qid))
+        if not positives:
+            skipped_no_qrel += 1
+            continue
+
+        candidate_rows = neighbor_rows[q_idx]
+        # Filter out positives from the candidate ranks.
+        pool: list[int] = []
+        for cand_row in candidate_rows.tolist():
+            cand_pid = int(pid_by_row[cand_row])
+            if cand_pid in positives:
+                continue
+            pool.append(cand_pid)
+            if len(pool) >= config.rank_max:
+                break
+        # Restrict to the configured rank window inside the filtered pool.
+        windowed = pool[config.rank_min : config.rank_max]
+        if len(windowed) < config.num_negatives:
+            skipped_insufficient_pool += 1
+            continue
+        negatives = rng.sample(windowed, config.num_negatives)
+
+        # Emit one row per known positive — the same negatives are reused.
+        for pos_pid in positives:
+            rows_out.append(
+                {
+                    "query_id": int(qid),
+                    "positive_id": int(pos_pid),
+                    "negative_ids": negatives,
+                }
+            )
+
+        if (q_idx + 1) % 10_000 == 0:
+            logger.info(
+                "Mined %d/%d queries (skipped_no_qrel=%d, skipped_pool=%d)",
+                q_idx + 1,
+                len(qid_by_row),
+                skipped_no_qrel,
+                skipped_insufficient_pool,
+            )
+
+    if not rows_out:
+        raise RuntimeError("No triples mined; check qrels coverage and parameters.")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    table = pa.Table.from_pylist(rows_out)
+    pq.write_table(table, output_path)  # type: ignore[no-untyped-call]
+    logger.info(
+        "Wrote %d triples to %s (skipped_no_qrel=%d, skipped_pool=%d)",
+        len(rows_out),
+        output_path,
+        skipped_no_qrel,
+        skipped_insufficient_pool,
+    )
+    return len(rows_out)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Mine hard negatives with Serafim-IR")
     parser.add_argument("--biencoder", default=DEFAULT_BIENCODER)
-    parser.add_argument("--collection", type=Path, default=Path("data/raw/mmarco/collection.tsv"))
-    parser.add_argument("--queries", type=Path, default=Path("data/raw/mmarco/queries.train.tsv"))
-    parser.add_argument("--qrels", type=Path, default=Path("data/raw/mmarco/qrels.train.tsv"))
+    parser.add_argument(
+        "--collection",
+        type=Path,
+        default=Path("data/raw/mmarco/collection_portuguese.parquet"),
+    )
+    parser.add_argument(
+        "--queries",
+        type=Path,
+        default=Path("data/raw/mmarco/queries_train_portuguese.parquet"),
+    )
+    parser.add_argument("--qrels", type=Path, default=Path("data/raw/mmarco/qrels.dev.small.tsv"))
     parser.add_argument(
         "--output", type=Path, default=Path("data/processed/hard_negatives.parquet")
     )
@@ -69,13 +276,33 @@ def main() -> None:
     parser.add_argument("--num-negatives", type=int, default=DEFAULT_NUM_NEGATIVES)
     parser.add_argument("--rank-min", type=int, default=DEFAULT_RANK_MIN)
     parser.add_argument("--rank-max", type=int, default=DEFAULT_RANK_MAX)
+    parser.add_argument("--encode-batch-size", type=int, default=DEFAULT_ENCODE_BATCH_SIZE)
+    parser.add_argument("--index-type", default="hnsw", choices=["hnsw", "flat"])
+    parser.add_argument("--device", default=None, help="torch device (cuda, mps, cpu)")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    # Implementation: encode -> index -> mine.
-    raise NotImplementedError("main() to be implemented in Phase 2")
+
+    config = MiningConfig(
+        biencoder=args.biencoder,
+        top_k=args.top_k,
+        num_negatives=args.num_negatives,
+        rank_min=args.rank_min,
+        rank_max=args.rank_max,
+        encode_batch_size=args.encode_batch_size,
+        seed=args.seed,
+    )
+    mine(
+        config,
+        args.queries,
+        args.qrels,
+        args.collection,
+        args.output,
+        index_type=args.index_type,
+        device=args.device,
+    )
 
 
 if __name__ == "__main__":

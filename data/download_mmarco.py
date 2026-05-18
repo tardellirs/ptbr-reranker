@@ -13,10 +13,11 @@ Each downloaded split is recorded in ``data/raw/mmarco/manifest.json`` along
 with the resolved revision SHA. The manifest is the artefact consumed by the
 ACL/NeurIPS-style reproducibility checklist (``docs/reproducibility.md``).
 
-MIRACL note: as of 2026-05, ``miracl/miracl`` has no Portuguese subset
-(`ar/bn/es/fa/fi/hi/id/ja/ko/sw/te/th/yo/zh`). MIRACL evaluation is therefore
-deferred; the cross-domain eval venue is a TODO captured in
-``docs/lab_notebook.md``.
+Cross-domain evaluation: MIRACL has no Portuguese subset. We use
+**Quati** (``unicamp-dl/quati``, native PT-BR web from ClueWeb22-pt) as the
+primary out-of-domain benchmark and **JurisTCU** (``LeandroRibeiro/JurisTCU``,
+Brazilian legal jurisprudence) as a hard domain-shift probe. See
+``src/eval_quati.py`` and ``src/eval_juristcu.py``.
 
 For development, use ``--small`` to materialize the first ~10k passages from
 the first collection shard plus a sample of train/dev queries.
@@ -44,6 +45,13 @@ COLLECTION_PATH_TEMPLATE = (
 QUERIES_TRAIN_PATH = "queries-portuguese/train/0000.parquet"
 QUERIES_DEV_PATH = "queries-portuguese/dev/0000.parquet"
 
+# qrels and triples live on main (TSV, language-agnostic). mMARCO inherits
+# qrels from MS MARCO since passage/query IDs are shared across translations.
+QRELS_DEV_PATH = "data/qrels.dev.tsv"
+QRELS_DEV_SMALL_PATH = "data/qrels.dev.small.tsv"
+TRIPLES_TRAIN_PATH = "data/triples.train.ids.small.tsv"
+BM25_RUN_PT_PATH = "data/google/runs/run.bm25_portuguese-msmarco.txt"
+
 DEFAULT_RAW_DIR = Path("data/raw")
 MANIFEST_NAME = "manifest.json"
 
@@ -57,6 +65,10 @@ EXPECTED_COUNTS_SMALL = {
     "queries_train": 1_000,
     "queries_dev": 100,
 }
+# qrels.dev.small has ~7437 (query_id, 0, passage_id, 1) lines. Used for eval.
+EXPECTED_QRELS_DEV_SMALL_LINES = 7437
+# triples.train.ids.small has ~39M (query_id, pos_id, neg_id) lines. Used for training.
+TRIPLES_TRAIN_SMALL_HEAD = 100_000  # small mode caps to this many triples
 
 
 @dataclass
@@ -87,8 +99,8 @@ def _resolve_revision(repo_id: str, revision: str) -> str | None:
         return None
 
 
-def _download_parquet(remote_path: str, revision: str) -> Path:
-    """Fetch a parquet file from HF Hub into the local cache."""
+def _download_file(remote_path: str, revision: str) -> Path:
+    """Fetch any file from HF Hub into the local cache."""
     from huggingface_hub import hf_hub_download
 
     cached = hf_hub_download(
@@ -98,6 +110,10 @@ def _download_parquet(remote_path: str, revision: str) -> Path:
         revision=revision,
     )
     return Path(cached)
+
+
+# Backwards-compatible alias.
+_download_parquet = _download_file
 
 
 def _materialize(
@@ -132,6 +148,79 @@ def _materialize(
         if writer is not None:
             writer.close()  # type: ignore[no-untyped-call]
     return rows_written
+
+
+def _materialize_tsv_head(
+    remote_path: str,
+    output_path: Path,
+    *,
+    revision: str = "main",
+    row_limit: int | None,
+) -> int:
+    """Stream a TSV file from HF Hub into local storage, optionally truncating."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    cached = _download_file(remote_path, revision)
+    rows_written = 0
+    with cached.open("rb") as src, output_path.open("wb") as dst:
+        for line in src:
+            if row_limit is not None and rows_written >= row_limit:
+                break
+            dst.write(line)
+            rows_written += 1
+    return rows_written
+
+
+def download_qrels_and_triples(
+    target_dir: Path,
+    *,
+    small: bool = False,
+) -> list[DatasetSnapshot]:
+    """Download qrels (dev split) and the official MS MARCO training triples.
+
+    These files live on the mMARCO main branch as TSV (not in the parquet
+    revision). They are language-agnostic: qrels and triples reference
+    (query_id, passage_id) integers shared across all mMARCO translations.
+
+    Returns the list of snapshots written.
+    """
+    mmarco_dir = target_dir / "mmarco"
+    mmarco_dir.mkdir(parents=True, exist_ok=True)
+    snapshots: list[DatasetSnapshot] = []
+
+    # qrels.dev.small.tsv — small, always download in full.
+    qrels_path = mmarco_dir / "qrels.dev.small.tsv"
+    logger.info("Materializing %s/%s", MMARCO_REPO, QRELS_DEV_SMALL_PATH)
+    qrels_rows = _materialize_tsv_head(QRELS_DEV_SMALL_PATH, qrels_path, row_limit=None)
+    logger.info("  → %s (%d lines)", qrels_path, qrels_rows)
+    snapshots.append(
+        DatasetSnapshot(
+            repo=MMARCO_REPO,
+            config="qrels",
+            split="dev.small",
+            revision="main",
+            num_rows=qrels_rows,
+            output_path=str(qrels_path.relative_to(target_dir.parent)),
+        )
+    )
+
+    # triples.train.ids.small.tsv — large (~5GB); cap in small mode.
+    triples_path = mmarco_dir / "triples.train.ids.small.tsv"
+    limit = TRIPLES_TRAIN_SMALL_HEAD if small else None
+    logger.info("Materializing %s/%s (limit=%s)", MMARCO_REPO, TRIPLES_TRAIN_PATH, limit)
+    triples_rows = _materialize_tsv_head(TRIPLES_TRAIN_PATH, triples_path, row_limit=limit)
+    logger.info("  → %s (%d lines)", triples_path, triples_rows)
+    snapshots.append(
+        DatasetSnapshot(
+            repo=MMARCO_REPO,
+            config="triples",
+            split="train.small",
+            revision="main",
+            num_rows=triples_rows,
+            output_path=str(triples_path.relative_to(target_dir.parent)),
+        )
+    )
+
+    return snapshots
 
 
 def download_mmarco(
@@ -304,6 +393,11 @@ def main() -> None:
         help="Pin mMARCO-PT to a specific revision SHA (default: latest refs/convert/parquet).",
     )
     parser.add_argument(
+        "--skip-qrels-triples",
+        action="store_true",
+        help="Skip qrels and training triples download (useful for re-running collection only).",
+    )
+    parser.add_argument(
         "--check", action="store_true", help="Validate existing data without downloading."
     )
     args = parser.parse_args()
@@ -319,6 +413,8 @@ def main() -> None:
         sys.exit(0 if ok else 1)
 
     snapshots = download_mmarco(args.target_dir, small=args.small, revision=args.mmarco_revision)
+    if not args.skip_qrels_triples:
+        snapshots.extend(download_qrels_and_triples(args.target_dir, small=args.small))
     write_manifest(args.target_dir, snapshots, small=args.small)
     check(args.target_dir, small=args.small)
 

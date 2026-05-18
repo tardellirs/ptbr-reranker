@@ -25,7 +25,8 @@ O ecossistema de IR para português brasileiro tem bi-encoders sólidos (Serafim
 |---|---|---|---|---|---|
 | mMARCO-PT MRR@10 | _TBD_ | _TBD_ | _TBD_ | _TBD_ | **_TBD_** |
 | mMARCO-PT nDCG@10 | _TBD_ | _TBD_ | _TBD_ | _TBD_ | **_TBD_** |
-| MIRACL-PT nDCG@10 | _TBD_ | _TBD_ | _TBD_ | _TBD_ | **_TBD_** |
+| Quati 1M nDCG@10 | _TBD_ | _TBD_ | _TBD_ | _TBD_ | **_TBD_** |
+| JurisTCU nDCG@10 | _TBD_ | _TBD_ | _TBD_ | _TBD_ | **_TBD_** |
 
 > _Tabela será atualizada após a Fase 3 (treino) e Fase 4 (avaliação)._
 
@@ -120,7 +121,7 @@ Detalhes em [`docs/quality-tests.md`](docs/quality-tests.md).
 
 - **Modelo base**: [`PORTULAN/albertina-100m-portuguese-ptbr-encoder`](https://huggingface.co/PORTULAN/albertina-100m-portuguese-ptbr-encoder) — DeBERTa-v3 adaptado para PT-BR.
 - **Dados de treino**: [`unicamp-dl/mmarco`](https://huggingface.co/datasets/unicamp-dl/mmarco) (subset português) + hard negatives minerados com `PORTULAN/serafim-100m-portuguese-pt-sentence-encoder-ir`.
-- **Avaliação**: mMARCO-PT dev split + MIRACL-PT.
+- **Avaliação**: mMARCO-PT dev split + [`unicamp-dl/quati`](https://huggingface.co/datasets/unicamp-dl/quati) (cross-domain web nativo) + [`LeandroRibeiro/JurisTCU`](https://huggingface.co/datasets/LeandroRibeiro/JurisTCU) (cross-domain jurídico).
 
 ## Citação
 
@@ -139,7 +140,8 @@ Se você usar este modelo em pesquisa, por favor cite também os trabalhos sobre
 - **Albertina**: [arXiv:2403.01897](https://arxiv.org/abs/2403.01897)
 - **Serafim**: [arXiv:2407.19527](https://arxiv.org/abs/2407.19527)
 - **mMARCO**: [arXiv:2108.13897](https://arxiv.org/abs/2108.13897)
-- **MIRACL**: [arXiv:2210.09984](https://arxiv.org/abs/2210.09984)
+- **Quati**: [arXiv:2404.06976](https://arxiv.org/abs/2404.06976)
+- **JurisTCU**: [arXiv:2503.08379](https://arxiv.org/abs/2503.08379)
 
 ## Contribuindo
 

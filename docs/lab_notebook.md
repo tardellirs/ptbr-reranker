@@ -201,6 +201,45 @@ https://www.kaggle.com/code/tardellistekel/ptbr-reranker-phase-1-validation
 
 ---
 
+## 2026-05-18 — Pivot da avaliação cross-domain + Phase 2 implementada
+
+**Hipótese:** Substituir MIRACL (sem PT) por benchmarks PT-BR nativos e implementar a pipeline de mineração + construção de triples para o treino.
+
+**Pesquisa cross-domain (agente em background):**
+- **Mr.TyDi**: não tem PT (mesmo gap do MIRACL — ambos derivam do TyDi QA).
+- **NeuCLIR / MultiCPR / HC4 / TyDi QA / XQuAD / MLQA**: nenhum tem PT.
+- **Mintaka PT** existe mas é traduzido (mesmo problema do mMARCO-PT).
+- **Quati** (`unicamp-dl/quati`, arXiv:2404.06976): **MELHOR opção**. Native PT-BR de ClueWeb22-pt, 50 topics com dense judgments TREC-style 4-point, 1M ou 10M passages, CC-BY-4.0. **Não derivado de mMARCO** — true generalization test.
+- **JurisTCU** (`LeandroRibeiro/JurisTCU`, arXiv:2503.08379): native PT-BR de jurisprudência do TCU, 16k docs + 150 queries + 2250 judgments (3 query styles). Probe de domínio jurídico hard.
+
+**Decisão:**
+- Primário cross-domain: **Quati 1M** (web nativo, generalização legítima).
+- Secundário cross-domain: **JurisTCU** (domain shift jurídico).
+- Renomeei `src/eval_miracl.py` → `src/eval_quati.py` (mantendo histórico via `git mv`).
+- Criei `src/eval_juristcu.py` para a segunda avaliação.
+
+**Phase 2 implementada:**
+- `data/mine_hard_negatives.py` agora funcional: encode collection com Serafim-IR (`SentenceTransformer`) → FAISS HNSW (`IndexHNSWFlat`, M=64, efConstruction=200) → search top-K (default 200) por query → filtrar positives via qrels → samplear N negs (default 7) da faixa rank [10, 100) → escrever parquet com schema `(query_id, positive_id, negative_ids[List[int]])`.
+- `data/build_triples.py` funcional: consome (a) `triples.train.ids.small.tsv` oficial do MS MARCO (BM25 negs, baseline grátis) e/ou (b) `hard_negatives.parquet` minerado. Sample weighted via `mix_ratio_official` ∈ [0,1]. Output: parquet com `(query_id, query_text, positive_text, negative_text)` pronto para o `src/train.py`.
+- `data/download_mmarco.py` estendido para puxar qrels e triples oficiais do mMARCO main branch (TSV, language-agnostic, IDs compartilhados entre traduções). Grande descoberta: **não precisamos minerar negativos para o baseline** — o MS MARCO já tem 39M triples (qid, pos, neg) prontos. A mineração Serafim vira upgrade opcional para o modelo final, permitindo ablation no paper.
+
+**Pegadas didáticas:**
+- mMARCO qrels e triples são *language-agnostic*: os IDs de query e passage são compartilhados entre todas as traduções, então `qrels.dev.small.tsv` e `triples.train.ids.small.tsv` no main branch servem para PT, EN, ES, etc.
+- ruff `RUF002` reclama de `×` em docstrings (sinal de multiplicação Unicode confundido com `x`). Usar `x` ASCII em código; `×` só em markdown.
+- pyarrow não tem stubs de tipo; mypy strict precisa de `# type: ignore[no-untyped-call]` nos calls. Alternativa: instalar `types-pyarrow` quando disponível (ainda não em maio/2026).
+
+**Resultado:**
+- 12 testes passando, lint e mypy limpos em 12 arquivos.
+- Pipeline Phase 1 (download) → Phase 2 (mining + build_triples) → Phase 3 (train) está conectada.
+
+**TODO próxima sessão:**
+- Rodar `mine_hard_negatives.py --small` no Kaggle T4×2 free para validar end-to-end com GPU.
+- Implementar `src/train.py` real (CrossEncoder fit loop).
+- Criar conta W&B e projeto `ptbr-reranker`.
+- Rotar token Kaggle (foi exposto na conversa anterior).
+
+---
+
 <!-- Template para próximas entradas:
 
 ## YYYY-MM-DD — Título curto

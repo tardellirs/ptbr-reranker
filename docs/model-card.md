@@ -15,7 +15,8 @@ tags:
   - mteb
 datasets:
   - unicamp-dl/mmarco
-  - miracl/miracl
+  - unicamp-dl/quati
+  - LeandroRibeiro/JurisTCU
 base_model: PORTULAN/albertina-100m-portuguese-ptbr-encoder
 model-index:
   - name: cross-encoder-albertina-ptbr-mmarco
@@ -37,14 +38,24 @@ model-index:
           type: text-ranking
           name: Passage Reranking
         dataset:
-          name: MIRACL-PT
-          type: miracl/miracl
-          config: pt
-          split: dev
+          name: Quati 1M
+          type: unicamp-dl/quati
+          config: "1M"
         metrics:
           - type: ndcg_at_10
             value: TBD
           - type: recall_at_100
+            value: TBD
+      - task:
+          type: text-ranking
+          name: Passage Reranking (Legal)
+        dataset:
+          name: JurisTCU
+          type: LeandroRibeiro/JurisTCU
+        metrics:
+          - type: ndcg_at_10
+            value: TBD
+          - type: mrr_at_10
             value: TBD
 ---
 
@@ -88,13 +99,13 @@ It takes a `(query, passage)` pair and returns a single relevance score.
 
 ## Evaluation
 
-| Model | mMARCO-PT MRR@10 | mMARCO-PT nDCG@10 | MIRACL-PT nDCG@10 |
-|---|---|---|---|
-| BM25 | TBD | TBD | TBD |
-| Serafim-IR (bi-encoder) | TBD | TBD | TBD |
-| mMiniLM-L12 (multilingual) | TBD | TBD | TBD |
-| BGE-reranker-v2-m3 | TBD | TBD | TBD |
-| **PTBR-Reranker (this)** | **TBD** | **TBD** | **TBD** |
+| Model | mMARCO-PT MRR@10 | mMARCO-PT nDCG@10 | Quati nDCG@10 | JurisTCU nDCG@10 |
+|---|---|---|---|---|
+| BM25 | TBD | TBD | TBD | TBD |
+| Serafim-IR (bi-encoder) | TBD | TBD | TBD | TBD |
+| mMiniLM-L12 (multilingual) | TBD | TBD | TBD | TBD |
+| BGE-reranker-v2-m3 | TBD | TBD | TBD | TBD |
+| **PTBR-Reranker (this)** | **TBD** | **TBD** | **TBD** | **TBD** |
 
 Statistical significance reported via paired bootstrap (n=1000) with 95% CIs.
 
@@ -140,4 +151,5 @@ scores = model.predict([(query, p) for p in passages])
 - **Albertina**: Rodrigues et al., "Advancing Neural Encoding of Portuguese with Transformer Albertina PT-\*". [arXiv:2403.01897](https://arxiv.org/abs/2403.01897)
 - **Serafim**: Rodrigues et al., "Open Sentence Embeddings for Portuguese with the Serafim PT* encoders family". [arXiv:2407.19527](https://arxiv.org/abs/2407.19527)
 - **mMARCO**: Bonifacio et al., "mMARCO: A Multilingual Version of the MS MARCO Passage Ranking Dataset". [arXiv:2108.13897](https://arxiv.org/abs/2108.13897)
-- **MIRACL**: Zhang et al., "Making a MIRACL: Multilingual Information Retrieval Across a Continuum of Languages". [arXiv:2210.09984](https://arxiv.org/abs/2210.09984)
+- **Quati**: Bonifacio et al., "Quati: A Brazilian Portuguese Information Retrieval Dataset". [arXiv:2404.06976](https://arxiv.org/abs/2404.06976)
+- **JurisTCU**: Ribeiro et al., "JurisTCU: A Brazilian Legal Information Retrieval Benchmark". [arXiv:2503.08379](https://arxiv.org/abs/2503.08379)
