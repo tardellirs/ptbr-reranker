@@ -2,7 +2,9 @@
 
 Notebooks de validação e análise. Mantidos no repositório como código (não como artefato exploratório descartável).
 
-## `kaggle_phase1_validation.ipynb`
+Cada subdiretório é um Kaggle Kernel independente (cada um com seu `kernel-metadata.json` para o `kaggle kernels push`).
+
+## `phase1_validation/kaggle_phase1_validation.ipynb`
 
 Valida o pipeline de Phase 1 sem custo de GPU paga, no free tier do Kaggle Kernels.
 
@@ -24,7 +26,7 @@ Valida o pipeline de Phase 1 sem custo de GPU paga, no free tier do Kaggle Kerne
 mkdir -p ~/.kaggle && echo "$KAGGLE_API_TOKEN" > ~/.kaggle/access_token && chmod 600 ~/.kaggle/access_token
 
 # 2) Push do kernel
-kaggle kernels push -p notebooks/
+kaggle kernels push -p notebooks/phase1_validation/
 
 # 3) Acompanhar status até completar
 until kaggle kernels status tardellistekel/ptbr-reranker-phase-1-validation 2>&1 | grep -qE 'COMPLETE|ERROR'; do sleep 20; done
@@ -62,8 +64,40 @@ kaggle kernels output tardellistekel/ptbr-reranker-phase-1-validation -p /tmp/ka
 - Atualizar a seção "Exact versions used in published model" em `docs/reproducibility.md` com as SHAs resolvidas.
 - Linkar o notebook executado (versão pública no Kaggle) no lab notebook.
 
+## `phase2_mining/kaggle_phase2_mining.ipynb`
+
+Valida o pipeline de Phase 2 (mineração de hard negatives + construção de triples de treino) no Kaggle Kernels com **GPU T4 free tier**.
+
+**O que ele faz:**
+1. Clona o repo e instala extras de dev.
+2. Roda `data/download_mmarco.py --small` (já validado em Phase 1).
+3. Confere cobertura de qrels nas 100 dev queries (sanity).
+4. Roda `data/mine_hard_negatives.py` em GPU T4 — encoda 10k passagens + 100 queries com `PORTULAN/serafim-100m-portuguese-pt-sentence-encoder-ir`, indexa com FAISS HNSW, samplea 5 hard negatives por query.
+5. Inspeção qualitativa: mostra query + positivo + 5 negativos para conferir que o mining produz negativos plausíveis-mas-irrelevantes.
+6. Roda `data/build_triples.py` em dois modos:
+   - **Baseline**: triples oficiais MS MARCO (BM25 negs, sem custo de GPU) — recipe `train_baseline.yaml`.
+   - **Hardneg**: triples a partir dos negativos minerados — recipe `train_hardneg.yaml`.
+7. Sanity check do schema final `(query_id, query_text, positive_text, negative_text)`.
+
+**Push e execução:**
+
+```bash
+kaggle kernels push -p notebooks/phase2_mining/
+
+until kaggle kernels status tardellistekel/ptbr-reranker-phase-2-mining 2>&1 | grep -qE 'COMPLETE|ERROR'; do sleep 30; done
+
+kaggle kernels output tardellistekel/ptbr-reranker-phase-2-mining -p /tmp/kaggle-phase2
+```
+
+**Settings do Kaggle:**
+- Accelerator: **GPU T4 x2** (ou single T4; suficiente para 10k passagens).
+- Internet: **On**.
+- Persistence: **Variables and files**.
+
+**Tempo esperado:** 8–15 min.
+
 ## Notebooks futuros (planejados)
 
-- `kaggle_phase2_mining.ipynb` — mineração de hard negatives com Serafim-IR + FAISS em Kaggle T4×2 (free).
-- `analysis.ipynb` — análise de erros e exemplos qualitativos para a seção Discussion do paper.
-- `wins_showcase.ipynb` — 30 casos onde o modelo ganha do baseline, para a seção Qualitative Analysis.
+- `phase3_training/` — treino real do cross-encoder em A100 (Runpod) ou T4 (Kaggle slice).
+- `analysis/` — análise de erros e exemplos qualitativos para a seção Discussion do paper.
+- `wins_showcase/` — 30 casos onde o modelo ganha do baseline, para a seção Qualitative Analysis.
