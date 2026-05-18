@@ -11,6 +11,9 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      HF_REPO: ${{ vars.HF_REPO || 'tardellirs/cross-encoder-albertina-ptbr-mmarco' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -29,8 +32,9 @@ jobs:
         run: python scripts/build_modelcard.py --validate
 
       - name: Publish to Hugging Face Hub
-        if: github.ref == 'refs/heads/main'
-        env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          HF_REPO: ${{ vars.HF_REPO || 'tardellirs/cross-encoder-albertina-ptbr-mmarco' }}
+        if: github.ref == 'refs/heads/main' && env.HF_TOKEN != ''
         run: python scripts/build_modelcard.py --publish
+
+      - name: Skip publish (HF_TOKEN not configured)
+        if: github.ref == 'refs/heads/main' && env.HF_TOKEN == ''
+        run: echo "::notice::HF_TOKEN secret is not set; skipping publish. Add it in repo Settings → Secrets to enable."
