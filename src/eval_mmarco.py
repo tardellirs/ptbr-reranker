@@ -193,7 +193,17 @@ def evaluate(
         if idx % 500 == 0:
             logger.info("Reranked %d / %d queries", idx, len(qids))
 
-    metrics_set = {"map", "ndcg_cut.10", "recip_rank.10", "recall.100", "recall.1000"}
+    # pytrec_eval normaliza nomes: ``ndcg_cut.10`` -> ``ndcg_cut_10``.
+    # Para MRR@10 a métrica correta é ``recip_rank_cut.10`` (vira
+    # ``recip_rank_cut_10`` no dict). ``recip_rank.10`` simplesmente não
+    # existe — ``recip_rank`` sozinho não aceita cutoff.
+    metrics_set = {
+        "map",
+        "ndcg_cut.10",
+        "recip_rank_cut.10",
+        "recall.100",
+        "recall.1000",
+    }
     qrels_for_eval = {qid: qrels[qid] for qid in qids if qid in qrels}
     evaluator = pytrec_eval.RelevanceEvaluator(qrels_for_eval, metrics_set)
     per_query = evaluator.evaluate(rerank_run)
@@ -201,7 +211,7 @@ def evaluate(
     aggregate: dict[str, float] = {
         "map": float(np.mean([m["map"] for m in per_query.values()])),
         "ndcg_at_10": float(np.mean([m["ndcg_cut_10"] for m in per_query.values()])),
-        "mrr_at_10": float(np.mean([m["recip_rank_10"] for m in per_query.values()])),
+        "mrr_at_10": float(np.mean([m["recip_rank_cut_10"] for m in per_query.values()])),
         "recall_at_100": float(np.mean([m["recall_100"] for m in per_query.values()])),
         "recall_at_1000": float(np.mean([m["recall_1000"] for m in per_query.values()])),
         "num_queries": len(per_query),
@@ -215,7 +225,7 @@ def evaluate(
                 "qid": qid,
                 "map": m["map"],
                 "ndcg_at_10": m["ndcg_cut_10"],
-                "mrr_at_10": m["recip_rank_10"],
+                "mrr_at_10": m["recip_rank_cut_10"],
                 "recall_at_100": m["recall_100"],
                 "recall_at_1000": m["recall_1000"],
             }
