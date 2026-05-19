@@ -220,6 +220,23 @@ def download_qrels_and_triples(
         )
     )
 
+    # run.bm25_portuguese-msmarco.txt — first-stage retrieval used by
+    # eval_mmarco. Format: ``qid Q0 docid rank score tag`` (TREC run).
+    bm25_path = mmarco_dir / "run.bm25_portuguese-msmarco.txt"
+    logger.info("Materializing %s/%s", MMARCO_REPO, BM25_RUN_PT_PATH)
+    bm25_rows = _materialize_tsv_head(BM25_RUN_PT_PATH, bm25_path, row_limit=None)
+    logger.info("  → %s (%d lines)", bm25_path, bm25_rows)
+    snapshots.append(
+        DatasetSnapshot(
+            repo=MMARCO_REPO,
+            config="bm25_run",
+            split="dev",
+            revision="main",
+            num_rows=bm25_rows,
+            output_path=str(bm25_path.relative_to(target_dir.parent)),
+        )
+    )
+
     return snapshots
 
 
