@@ -199,28 +199,63 @@ def triples_to_pairs(triples_path: Path) -> datasets.Dataset:
     """Read ``(query, positive, negative)`` triples and expand to ``(text_a, text_b, label)`` pairs.
 
     Each triple becomes two pair examples with labels 1.0 (positive) and
-    0.0 (negative). The HF datasets ``Dataset`` returned is consumed by
-    ``CrossEncoderTrainer`` and ``BinaryCrossEntropyLoss``.
+    0.0 (negative). For 10M+ triples we cannot materialise the whole
+    expansion in Python lists — ``.to_pylist()`` over a 3GB parquet blows
+    up to ~30GB of string objects and gets cgroup-OOM-killed silently.
+    Stream batches through pyarrow, write an on-disk pair parquet next to
+    the input, and return a memory-mapped ``Dataset.from_parquet``.
+
+    The pair parquet is cached at ``<input>_pairs.parquet``; subsequent
+    calls reuse it. Delete the cache file to force regeneration.
     """
+    import pyarrow as pa
     from datasets import Dataset
 
-    table = pq.read_table(triples_path)  # type: ignore[no-untyped-call]
-    queries = table["query_text"].to_pylist()
-    positives = table["positive_text"].to_pylist()
-    negatives = table["negative_text"].to_pylist()
+    pairs_path = triples_path.with_name(triples_path.stem + "_pairs.parquet")
+    schema = pa.schema(
+        [
+            ("sentence_A", pa.string()),
+            ("sentence_B", pa.string()),
+            ("label", pa.float32()),
+        ]
+    )
 
-    sentence_a: list[str] = []
-    sentence_b: list[str] = []
-    labels: list[float] = []
-    for q, p, n in zip(queries, positives, negatives, strict=True):
-        sentence_a.append(q)
-        sentence_b.append(p)
-        labels.append(1.0)
-        sentence_a.append(q)
-        sentence_b.append(n)
-        labels.append(0.0)
+    if not pairs_path.exists():
+        logger.info("Expanding triples → pairs parquet at %s", pairs_path)
+        pf = pq.ParquetFile(triples_path)  # type: ignore[no-untyped-call]
+        writer = pq.ParquetWriter(pairs_path, schema)  # type: ignore[no-untyped-call]
+        written = 0
+        try:
+            for batch in pf.iter_batches(  # type: ignore[no-untyped-call]
+                batch_size=50_000,
+                columns=["query_text", "positive_text", "negative_text"],
+            ):
+                queries = batch["query_text"].to_pylist()
+                positives = batch["positive_text"].to_pylist()
+                negatives = batch["negative_text"].to_pylist()
+                sa: list[str] = []
+                sb: list[str] = []
+                lab: list[float] = []
+                for q, p, n in zip(queries, positives, negatives, strict=True):
+                    sa.append(q)
+                    sb.append(p)
+                    lab.append(1.0)
+                    sa.append(q)
+                    sb.append(n)
+                    lab.append(0.0)
+                out_batch = pa.RecordBatch.from_arrays(
+                    [pa.array(sa), pa.array(sb), pa.array(lab, type=pa.float32())],
+                    schema=schema,
+                )
+                writer.write_batch(out_batch)  # type: ignore[no-untyped-call]
+                written += len(sa)
+                if written % 1_000_000 == 0:
+                    logger.info("Expanded %d pair rows so far", written)
+        finally:
+            writer.close()  # type: ignore[no-untyped-call]
+        logger.info("Wrote %d pair rows to %s", written, pairs_path)
 
-    return Dataset.from_dict({"sentence_A": sentence_a, "sentence_B": sentence_b, "label": labels})
+    return Dataset.from_parquet(str(pairs_path))
 
 
 def _maybe_start_codecarbon(output_dir: Path, enabled: bool) -> object | None:
