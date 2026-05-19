@@ -110,23 +110,35 @@ def build(
             ("negative_text", pa.string()),
         ]
     )
+    buffer: list[dict[str, object]] = []
+    BUFFER_SIZE = 10_000
 
-    def _emit(qid: int, pos_id: int, neg_id: int) -> bool:
-        nonlocal writer, written, dropped_unknown_ids
-        if qid not in query_text or pos_id not in passage_text or neg_id not in passage_text:
-            dropped_unknown_ids += 1
-            return False
-        row = {
-            "query_id": qid,
-            "query_text": query_text[qid],
-            "positive_text": passage_text[pos_id],
-            "negative_text": passage_text[neg_id],
-        }
-        batch = pa.RecordBatch.from_pylist([row], schema=schema)
+    def _flush() -> None:
+        nonlocal writer
+        if not buffer:
+            return
+        batch = pa.RecordBatch.from_pylist(buffer, schema=schema)
         if writer is None:
             writer = pq.ParquetWriter(output_path, schema)  # type: ignore[no-untyped-call]
         writer.write_batch(batch)  # type: ignore[no-untyped-call]
+        buffer.clear()
+
+    def _emit(qid: int, pos_id: int, neg_id: int) -> bool:
+        nonlocal written, dropped_unknown_ids
+        if qid not in query_text or pos_id not in passage_text or neg_id not in passage_text:
+            dropped_unknown_ids += 1
+            return False
+        buffer.append(
+            {
+                "query_id": qid,
+                "query_text": query_text[qid],
+                "positive_text": passage_text[pos_id],
+                "negative_text": passage_text[neg_id],
+            }
+        )
         written += 1
+        if len(buffer) >= BUFFER_SIZE:
+            _flush()
         return True
 
     sources: list[tuple[str, float]] = []
@@ -162,6 +174,7 @@ def build(
             if written % 100_000 == 0 and written > 0:
                 logger.info("Wrote %d triples so far", written)
     finally:
+        _flush()
         if writer is not None:
             writer.close()  # type: ignore[no-untyped-call]
 
