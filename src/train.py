@@ -103,13 +103,37 @@ def set_seed(seed: int) -> None:
     torch.cuda.manual_seed_all(seed)
 
 
+MIN_CUDA_CAPABILITY = (7, 0)
+
+
 def resolve_device(requested: str) -> str:
-    """Pick a usable torch device. Mirrors ``data.mine_hard_negatives.resolve_device``."""
+    """Pick a usable torch device. Mirrors ``data.mine_hard_negatives.resolve_device``.
+
+    A basic ``zeros + 1`` op passes on Kaggle's P100 (sm_60) even though the
+    PyTorch build there only ships kernels for sm_70+, so the model forward
+    eventually crashes inside DeBERTa attention. Check compute capability
+    explicitly and fall back to CPU when below the supported floor.
+    """
     if requested == "cpu":
         return "cpu"
     if requested not in ("auto", "cuda"):
         return requested
     if not torch.cuda.is_available():
+        return "cpu"
+    try:
+        capability = torch.cuda.get_device_capability(0)
+    except Exception as exc:  # pragma: no cover - environment-specific
+        logger.warning("Could not query CUDA capability (%s); falling back to CPU.", exc)
+        return "cpu"
+    if capability < MIN_CUDA_CAPABILITY:
+        logger.warning(
+            "Detected CUDA device with capability sm_%d%d which is below the "
+            "PyTorch-supported floor sm_%d%d; falling back to CPU.",
+            capability[0],
+            capability[1],
+            MIN_CUDA_CAPABILITY[0],
+            MIN_CUDA_CAPABILITY[1],
+        )
         return "cpu"
     try:
         _ = (torch.zeros(1, device="cuda") + 1).cpu()

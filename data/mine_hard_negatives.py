@@ -65,14 +65,17 @@ class MiningConfig:
             )
 
 
+MIN_CUDA_CAPABILITY = (7, 0)
+
+
 def resolve_device(requested: str | None) -> str:
     """Pick a torch device that is actually usable by the current install.
 
     Some hosted environments (e.g. Kaggle's P100 instances paired with newer
     PyTorch builds compiled only for sm_70+) advertise CUDA as available but
     will then raise ``CUDA error: no kernel image is available for execution``
-    on the first kernel launch. We do a tiny probe to detect that situation
-    and fall back to CPU.
+    on the first kernel launch. A basic ``zeros + 1`` op passes on sm_60, so
+    additionally check compute capability against the supported floor.
     """
     import torch
 
@@ -81,6 +84,21 @@ def resolve_device(requested: str | None) -> str:
     if requested and requested != "auto":
         return requested
     if not torch.cuda.is_available():
+        return "cpu"
+    try:
+        capability = torch.cuda.get_device_capability(0)
+    except Exception as exc:  # pragma: no cover - environment-specific
+        logger.warning("Could not query CUDA capability (%s); falling back to CPU.", exc)
+        return "cpu"
+    if capability < MIN_CUDA_CAPABILITY:
+        logger.warning(
+            "Detected CUDA device with capability sm_%d%d which is below the "
+            "PyTorch-supported floor sm_%d%d; falling back to CPU.",
+            capability[0],
+            capability[1],
+            MIN_CUDA_CAPABILITY[0],
+            MIN_CUDA_CAPABILITY[1],
+        )
         return "cpu"
     try:
         _ = (torch.zeros(1, device="cuda") + 1).cpu()
