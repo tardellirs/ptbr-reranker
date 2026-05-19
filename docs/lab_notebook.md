@@ -406,6 +406,29 @@ https://www.kaggle.com/code/tardellistekel/ptbr-reranker-phase-2-hard-negative-m
 
 ---
 
+## 2026-05-19 — v1.0 (10M triples) com RTX 5090
+
+**Decisões:**
+- Aumentar de 2M para **10M triples** (~5× mais dados → mais sinal).
+- Community Cloud 4090 sem estoque hoje; tentei 3090 → bug "CUDA unknown error" em dois hosts diferentes do mesmo IP (passthrough quebrado).
+- **RTX 5090** Community disponível, $0.69/h (mesmo preço que Secure 4090), **32GB VRAM**, **sm_120 Blackwell**. Pivot para 5090.
+- RTX 5090 sm_120 não suportado por torch 2.4 default do Runpod (kernels só até sm_90). Upgrade para **torch 2.11+cu128** (suporta sm_120).
+- Estimativa nova: 5090 ~1.5× do 4090 → 10M = ~19h = **$13**. Saldo $22.58 → ~$10 após.
+
+**`src/eval_mmarco.py` implementado** (commit `e83dddb`):
+- Loader TREC qrels e BM25 run.
+- Filtragem memory-efficient da collection (~700k de 8.8M PIDs).
+- Rerank top-N + pytrec_eval → MRR@10, nDCG@10, MAP, Recall@100, Recall@1000.
+- Per-query parquet output para bootstrap (`src.stats`).
+- `data/download_mmarco.py` agora baixa também `run.bm25_portuguese-msmarco.txt` (6.98M cands, 133MB).
+
+**Em curso:**
+- Pod 5090 ativo (`juv2pu0dflapua`), 174.94.157.109:32281.
+- Download mMARCO full: completo (collection 1.8GB, triples 905MB, BM25 133MB).
+- Build 10M triples: em progresso.
+
+---
+
 <!-- Template para próximas entradas:
 
 ## YYYY-MM-DD — Título curto
