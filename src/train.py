@@ -343,8 +343,15 @@ def train(
     *,
     debug: bool = False,
     max_steps: int | None = None,
+    resume_from_checkpoint: str | Path | None = None,
 ) -> Path:
-    """Train the cross-encoder. Returns the path to the best checkpoint."""
+    """Train the cross-encoder. Returns the path to the best checkpoint.
+
+    ``resume_from_checkpoint`` reloads optimizer + scheduler + RNG + step from
+    a HuggingFace Trainer checkpoint dir (e.g. ``runs/baseline_10M/checkpoint-180000``)
+    and continues training from the saved step — needed when a pod has to be
+    rebuilt mid-run (out of credits, eviction, host issue).
+    """
     from sentence_transformers import CrossEncoder
     from sentence_transformers.cross_encoder.losses import BinaryCrossEntropyLoss
     from sentence_transformers.cross_encoder.trainer import CrossEncoderTrainer
@@ -416,7 +423,11 @@ def train(
     )
 
     try:
-        trainer.train()
+        if resume_from_checkpoint is not None:
+            logger.info("Resuming training from %s", resume_from_checkpoint)
+            trainer.train(resume_from_checkpoint=str(resume_from_checkpoint))
+        else:
+            trainer.train()
     finally:
         if tracker is not None:
             tracker.stop()  # type: ignore[attr-defined]
@@ -444,6 +455,14 @@ def main() -> None:
         help="Override HF_DATASETS_CACHE (useful on pods where the home "
         "overlay is small). Defaults to <output_dir>/.hf_cache if unset.",
     )
+    parser.add_argument(
+        "--resume-from-checkpoint",
+        type=Path,
+        default=None,
+        help="Path to a Trainer checkpoint dir to resume training from "
+        "(restores optimizer, scheduler, RNG, step). Useful when a pod has "
+        "to be rebuilt mid-run.",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -454,7 +473,12 @@ def main() -> None:
     cache_dir.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("HF_DATASETS_CACHE", str(cache_dir))
     os.environ.setdefault("HF_HOME", str(cache_dir))
-    train(config, debug=args.debug, max_steps=args.max_steps)
+    train(
+        config,
+        debug=args.debug,
+        max_steps=args.max_steps,
+        resume_from_checkpoint=args.resume_from_checkpoint,
+    )
 
 
 if __name__ == "__main__":
