@@ -255,7 +255,13 @@ def triples_to_pairs(triples_path: Path) -> datasets.Dataset:
             writer.close()  # type: ignore[no-untyped-call]
         logger.info("Wrote %d pair rows to %s", written, pairs_path)
 
-    return Dataset.from_parquet(str(pairs_path))
+    # ``Dataset.from_parquet`` caches a copy of the parquet to
+    # ``$HF_DATASETS_CACHE`` (default ``~/.cache/huggingface/datasets``).
+    # On hosted pods the home overlay is small (~8GB) while the workspace
+    # volume has more room; respect HF_DATASETS_CACHE if the caller set it
+    # to a roomier path, otherwise leave HF's default. ``keep_in_memory``
+    # is False so big datasets remain memory-mapped.
+    return Dataset.from_parquet(str(pairs_path), keep_in_memory=False)
 
 
 def _maybe_start_codecarbon(output_dir: Path, enabled: bool) -> object | None:
@@ -427,12 +433,23 @@ def main() -> None:
     parser.add_argument("--config", type=Path, required=True, help="Path to YAML config")
     parser.add_argument("--debug", action="store_true", help="Run in debug mode (tiny data)")
     parser.add_argument("--max_steps", type=int, default=None, help="Override max training steps")
+    parser.add_argument(
+        "--hf-cache-dir",
+        type=Path,
+        default=None,
+        help="Override HF_DATASETS_CACHE (useful on pods where the home "
+        "overlay is small). Defaults to <output_dir>/.hf_cache if unset.",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
     # Avoid TOKENIZERS_PARALLELISM warning when forking.
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
     config = TrainConfig.from_yaml(args.config)
+    cache_dir = args.hf_cache_dir or (config.output_dir / ".hf_cache")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("HF_DATASETS_CACHE", str(cache_dir))
+    os.environ.setdefault("HF_HOME", str(cache_dir))
     train(config, debug=args.debug, max_steps=args.max_steps)
 
 
