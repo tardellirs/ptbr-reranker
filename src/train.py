@@ -167,20 +167,40 @@ def _maybe_start_codecarbon(output_dir: Path, enabled: bool) -> object | None:
 
 
 def _maybe_init_wandb(config: TrainConfig, resolved_device: str) -> bool:
-    """Initialize wandb if a project is configured. Returns True on success."""
+    """Initialize wandb if a project is configured AND credentials are available.
+
+    Returns True on success. Returns False (with a logged warning) when the
+    YAML sets ``wandb_project`` but the environment lacks ``WANDB_API_KEY`` or
+    a cached netrc login — common in CI and hosted notebooks where we don't
+    want a missing token to crash an otherwise valid training run.
+    """
     if not config.wandb_project:
+        return False
+    if os.environ.get("WANDB_DISABLED", "").lower() in {"1", "true", "yes"}:
+        logger.info("WANDB_DISABLED is set; skipping W&B init.")
+        return False
+    if not os.environ.get("WANDB_API_KEY") and not Path("~/.netrc").expanduser().exists():
+        logger.warning(
+            "wandb_project=%r is set but no WANDB_API_KEY env var or ~/.netrc found; "
+            "skipping W&B logging.",
+            config.wandb_project,
+        )
         return False
     try:
         import wandb
     except ImportError:  # pragma: no cover - wandb is optional
         logger.warning("wandb_project set but wandb is not installed; skipping.")
         return False
-    wandb.init(
-        project=config.wandb_project,
-        name=config.wandb_run_name,
-        tags=config.wandb_tags or None,
-        config={**asdict(config), "resolved_device": resolved_device},
-    )
+    try:
+        wandb.init(
+            project=config.wandb_project,
+            name=config.wandb_run_name,
+            tags=config.wandb_tags or None,
+            config={**asdict(config), "resolved_device": resolved_device},
+        )
+    except Exception as exc:  # pragma: no cover - network / auth failures
+        logger.warning("wandb.init failed (%s); proceeding without W&B logging.", exc)
+        return False
     return True
 
 
