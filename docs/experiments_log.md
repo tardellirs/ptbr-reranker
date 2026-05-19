@@ -13,7 +13,8 @@ Toda run de treino, incluindo failures e debugging, vai aqui. Esta tabela vira o
 
 | ID | Data | Base | Dados | Loss | LR | Batch | Epochs | Max len | Seed | MRR@10 | nDCG@10 | MIRACL nDCG@10 | ECE | GPU·h | $ | Status | Notas |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| _placeholder_ | _2026-MM-DD_ | albertina-100m | mmarco+hardneg | softmax | 2e-5 | 64 | 1 | 256 | 42 | – | – | – | – | – | – | pending | first real run |
+| baseline_2M (v0.1) | 2026-05-19 | albertina-100m | mmarco 2M BM25-only | BinaryCE | 2e-5 | 32×2=64 | 1 | 256 | 42 | **0.2810** | **0.3232** | – | – | 4090 ~4.5h | ~$3.2 train+eval | keep | primeiro checkpoint publicável; sem hard negatives; eval na 4090 (28min, $0.32); artefatos em `outputs/v0.1/` |
+| baseline_10M (v1.0) | 2026-05-19/20 | albertina-100m | mmarco 10M BM25-only | BinaryCE | 2e-5 | 32×2=64 | 1 | 256 | 42 | – | – | – | – | 5090 ~19h (est.) | ~$13 train | running | 5× mais dados que v0.1; step 71k/312.5k às 15h45 do dia 19 |
 
 ## Ablations planejadas
 

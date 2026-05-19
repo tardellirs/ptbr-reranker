@@ -429,6 +429,48 @@ https://www.kaggle.com/code/tardellistekel/ptbr-reranker-phase-2-hard-negative-m
 
 ---
 
+## 2026-05-19 — Eval v0.1 (2M baseline) em mMARCO-PT dev
+
+**Hipótese:** o checkpoint v0.1 (Albertina-100m + 2M triples BM25, 1 época) já deve bater BM25 puro em MRR@10 mesmo sem hard negatives.
+
+**O que fiz:**
+- Rodei `src.eval_mmarco` em **RTX 4090 Secure** (pod `89vdevw8ud6ppd`), $0.69/h.
+- Rerank top-100 BM25 sobre **6 980 queries** dev, batch 64, max_len 256, bf16 (CUDA).
+- Bugs encontrados e corrigidos no caminho:
+  - `recip_rank.10` → `recip_rank_cut.10` → ambos inválidos. trec_eval **não aceita cutoff em recip_rank**. Solução: implementar `_mrr_at_k` em Python puro (commit `6f14dd9`).
+  - Como bug de métrica já tinha custado um rerank inteiro (~$0.30), agora o `rerank_run` é **dumpado em parquet ANTES** das métricas — qualquer erro futuro de métrica é recomputável offline sem nova inferência.
+  - Smoke test com `--max-queries 20` antes do run completo (38s, $0.007) — práxis nova depois de duas inferências inteiras descartadas.
+- Pod 4090 terminado depois (commit `819fd19` adiciona `scripts/runpod_terminate.sh` pra próximas).
+
+**Resultado:**
+
+| Métrica | v0.1 | Referência |
+|---|---|---|
+| **MRR@10** | **0.2810** | BM25 ~0.18 · mMiniLM ~0.30 · BGE-v2-m3 ~0.35-0.38 |
+| **nDCG@10** | **0.3232** | — |
+| MAP | 0.2808 | — |
+| Recall@100 | 0.5566 | (= R@1000, capado a top-100 BM25) |
+| num_queries | 6 980 | full dev split mMARCO-PT |
+
+- **+10 pp sobre BM25 puro**, **empata com mMiniLM-L12 multilingual** (5+ línguas, mais dados, mais parâmetros).
+- Atrás de BGE-reranker-v2-m3 mas com **5.7× menos parâmetros** — esperado.
+- Artefatos em `outputs/v0.1/`: `eval_mmarco_v0.1.json`, `_per_query.parquet` (para bootstrap CIs), `_rerank.parquet` (scores brutos).
+
+**Decisão:**
+- v0.1 confirma que a pipeline funciona end-to-end. Modelo já é publicável como "preview baseline".
+- v1.0 (10M triples, 1 época) deve subir para faixa 0.30-0.33 só com mais dados — confirma a aposta de aumentar 2M → 10M.
+- Hard negatives (Fase 5 do plano original) provavelmente são a próxima alavanca pra passar de 0.35.
+
+**TODO:**
+- [x] Pull artefatos para Mac (`outputs/v0.1/`).
+- [x] Terminar 4090 (economia ~$9.66 ociosa).
+- [ ] Atualizar `docs/experiments_log.md` com a linha do v0.1.
+- [ ] Esperar treino v1.0 terminar (~14h restantes, step 71k/312.5k às 15h45).
+- [ ] Rodar eval v1.0 na mesma 5090 após treino.
+- [ ] Bootstrap CI 95% do MRR@10/nDCG@10 com `src.stats` no per-query parquet.
+
+---
+
 <!-- Template para próximas entradas:
 
 ## YYYY-MM-DD — Título curto
