@@ -360,6 +360,22 @@ https://www.kaggle.com/code/tardellistekel/ptbr-reranker-phase-2-hard-negative-m
 - BinaryCrossEntropyLoss
 - mixed_precision: fp32 forced for Albertina (DeBERTa-family)
 
+**Verificação DeBERTa bf16 (durante a noite):** Confirmei que o bug do `finfo(query_layer.dtype).min` está em **TODAS** as versões de transformers (4.x e 5.x). É 1 linha, fix trivial: trocar para `attention_scores.dtype`. Apliquei via `patch_deberta_attention_dtype()` em src/train.py — modifica o arquivo on-disk de forma idempotente antes do import. bf16 passou no teste após patch. **Reverti o "force fp32 for DeBERTa"** — agora bf16 funciona corretamente.
+
+**Bench bf16 real (4090, bs=64 effective, max_len=256):**
+- **2.91 sps** com patch + bf16 (vs 2.05 sps fp32, +42%)
+- 2M triples / 62500 steps → **5.96h** = $2.03
+- 40M (full) → 119h = $40.5 (ainda over budget)
+
+**Build_triples bug paralelo:** o emit one-row-per-batch criava 2M row groups → pyarrow falhava ao reler com "Exceeded size limit". Fix: buffer de 10k rows, flush em batches. Reduziu de 2M row groups → 200. Commit `6a67333`.
+
+**Treino noturno iniciado 2026-05-19 02:40 UTC:**
+- Config: `train_baseline_2M_runpod.yaml`
+- 2M triples baseline (BM25 official negs), 1 epoch, bs=64 effective, max_len=256, lr 2e-5, bf16
+- save_every_steps=2000 (≈11min checkpoints), log_every_steps=100
+- Estimativa: 6h, $2 GPU
+- PID 8197, log em `logs/train_2M.log`
+
 ---
 
 <!-- Template para próximas entradas:
