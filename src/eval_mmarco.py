@@ -88,9 +88,7 @@ def _load_bm25_run(
     return out
 
 
-def _mrr_at_k(
-    qrel_q: dict[str, int], doc_scores: dict[str, float], *, k: int = 10
-) -> float:
+def _mrr_at_k(qrel_q: dict[str, int], doc_scores: dict[str, float], *, k: int = 10) -> float:
     """MRR@k: reciprocal rank of the first relevant doc within top-k by score.
 
     trec_eval (and thus pytrec_eval) only exposes ``recip_rank`` with no
@@ -218,9 +216,7 @@ def evaluate(
     # ``src.score_rerank`` (or any ad-hoc script) can recompute metrics
     # offline without re-running the model.
     if per_query_output is not None:
-        rerank_dump_path = per_query_output.with_name(
-            per_query_output.stem + "_rerank.parquet"
-        )
+        rerank_dump_path = per_query_output.with_name(per_query_output.stem + "_rerank.parquet")
         rerank_dump_path.parent.mkdir(parents=True, exist_ok=True)
         dump_rows = [
             {"qid": qid, "docid": did, "score": float(s)}
