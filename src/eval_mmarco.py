@@ -88,6 +88,26 @@ def _load_bm25_run(
     return out
 
 
+def _mrr_at_k(
+    qrel_q: dict[str, int], doc_scores: dict[str, float], *, k: int = 10
+) -> float:
+    """MRR@k: reciprocal rank of the first relevant doc within top-k by score.
+
+    trec_eval (and thus pytrec_eval) only exposes ``recip_rank`` with no
+    cutoff, so MRR@10 has to be computed manually. We sort by score
+    descending, scan the top ``k`` entries, and return ``1/rank`` of the
+    first ``rel > 0`` doc, or ``0.0`` if none of the top-k is relevant.
+    """
+    relevant = {d for d, r in qrel_q.items() if r > 0}
+    if not relevant:
+        return 0.0
+    ranked = sorted(doc_scores.items(), key=lambda x: x[1], reverse=True)[:k]
+    for rank, (did, _) in enumerate(ranked, start=1):
+        if did in relevant:
+            return 1.0 / rank
+    return 0.0
+
+
 def _load_id_text_dict(parquet_path: Path, needed_ids: set[str]) -> dict[str, str]:
     """Load a parquet with ``id, text`` columns, filtered to ``needed_ids`` for memory.
 
@@ -193,25 +213,48 @@ def evaluate(
         if idx % 500 == 0:
             logger.info("Reranked %d / %d queries", idx, len(qids))
 
+    # Persist raw rerank scores BEFORE metric computation. A bug in metric
+    # naming previously discarded a full inference pass; with this dump
+    # ``src.score_rerank`` (or any ad-hoc script) can recompute metrics
+    # offline without re-running the model.
+    if per_query_output is not None:
+        rerank_dump_path = per_query_output.with_name(
+            per_query_output.stem + "_rerank.parquet"
+        )
+        rerank_dump_path.parent.mkdir(parents=True, exist_ok=True)
+        dump_rows = [
+            {"qid": qid, "docid": did, "score": float(s)}
+            for qid, doc_scores in rerank_run.items()
+            for did, s in doc_scores.items()
+        ]
+        pq.write_table(pa.Table.from_pylist(dump_rows), rerank_dump_path)  # type: ignore[no-untyped-call]
+        logger.info("Wrote raw rerank scores to %s", rerank_dump_path)
+
     # pytrec_eval normaliza nomes: ``ndcg_cut.10`` -> ``ndcg_cut_10``.
-    # Para MRR@10 a métrica correta é ``recip_rank_cut.10`` (vira
-    # ``recip_rank_cut_10`` no dict). ``recip_rank.10`` simplesmente não
-    # existe — ``recip_rank`` sozinho não aceita cutoff.
-    metrics_set = {
-        "map",
-        "ndcg_cut.10",
-        "recip_rank_cut.10",
-        "recall.100",
-        "recall.1000",
-    }
+    # trec_eval (e portanto pytrec_eval) NÃO aceita cutoff em
+    # reciprocal_rank: nem ``recip_rank.10`` nem ``recip_rank_cut.10``
+    # existem. Para MRR@10 calculamos manualmente abaixo a partir do
+    # ``rerank_run`` cru.
+    metrics_set = {"map", "ndcg_cut.10", "recall.100", "recall.1000"}
     qrels_for_eval = {qid: qrels[qid] for qid in qids if qid in qrels}
     evaluator = pytrec_eval.RelevanceEvaluator(qrels_for_eval, metrics_set)
-    per_query = evaluator.evaluate(rerank_run)
+    per_query_pte = evaluator.evaluate(rerank_run)
+
+    mrr_at_10_per_query = {
+        qid: _mrr_at_k(qrels[qid], rerank_run[qid], k=10)
+        for qid in per_query_pte
+        if qid in rerank_run and qid in qrels
+    }
+
+    per_query: dict[str, dict[str, float]] = {
+        qid: {**m, "mrr_at_10": mrr_at_10_per_query.get(qid, 0.0)}
+        for qid, m in per_query_pte.items()
+    }
 
     aggregate: dict[str, float] = {
         "map": float(np.mean([m["map"] for m in per_query.values()])),
         "ndcg_at_10": float(np.mean([m["ndcg_cut_10"] for m in per_query.values()])),
-        "mrr_at_10": float(np.mean([m["recip_rank_cut_10"] for m in per_query.values()])),
+        "mrr_at_10": float(np.mean([m["mrr_at_10"] for m in per_query.values()])),
         "recall_at_100": float(np.mean([m["recall_100"] for m in per_query.values()])),
         "recall_at_1000": float(np.mean([m["recall_1000"] for m in per_query.values()])),
         "num_queries": len(per_query),
@@ -225,7 +268,7 @@ def evaluate(
                 "qid": qid,
                 "map": m["map"],
                 "ndcg_at_10": m["ndcg_cut_10"],
-                "mrr_at_10": m["recip_rank_cut_10"],
+                "mrr_at_10": m["mrr_at_10"],
                 "recall_at_100": m["recall_100"],
                 "recall_at_1000": m["recall_1000"],
             }
