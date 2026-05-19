@@ -323,6 +323,45 @@ https://www.kaggle.com/code/tardellistekel/ptbr-reranker-phase-2-hard-negative-m
 
 ---
 
+## 2026-05-19 — Runpod RTX 4090 — primeira rodada paga
+
+**Decisão de hardware:** RTX 4090 Community Cloud a $0.34/h venceu A100. ~2× mais compute por dólar (4090 0.6× A100 throughput a 0.34× preço de A100). Cabia até treino "full" em bf16 mas...
+
+**4 bugs em cascata na primeira rodada paga (com fixes):**
+
+| Bug | Causa | Fix |
+|---|---|---|
+| (1) Deploy "no resources" em COMMUNITY | Provisioner instável; tentei SECURE → cobrou $0.69/h em vez de $0.34 | Reduzi specs (vcpu 4→2, mem 16→8, disk 40→20). Retomou COMMUNITY ok. |
+| (2) `transformers 5.8 + torch 2.4` incompat | runpod/pytorch:2.4 ships torch 2.4; transformers 5.x precisa torch>=2.5 | `pip install -U torch torchvision` → 2.6.0+cu124 |
+| (3) DeBERTa + bf16 overflow | `attention_scores.masked_fill(~mask, torch.finfo(query_layer.dtype).min)` em modeling_deberta.py:276 — query é fp32 (autocast keeps inputs), attention_scores é bf16, finfo(fp32).min overflowa bf16 | Pin `transformers>=4.44,<5` + force fp32 para DeBERTa-family no train.py |
+| (4) Mesma falha em fp16 | finfo(fp32).min também overflowa Half | Mudei "downgrade to fp16" → "force fp32" no train.py |
+
+**Smoke test passou (4090, fp32):** 5 steps em 4.4s = 1.14 sps full pipeline. Treino 5 steps em 4.39s. Checkpoint salvo.
+
+**Benchmark de throughput (bs=32, grad_accum=2 = effective 64, max_len=256, fp32):**
+- **2.05 steps/sec** no 4090
+- 1M triples → 31250 steps → **4.2h** ($1.43)
+- 2M triples → **8.5h** ($2.90)
+- 5M triples → 21h ($7.10)
+- 40M (full mMARCO) → **169h ($58)** — não cabe nos $20
+
+**fp32 é 50–60% mais lento que bf16 funcional teria sido.** Trade-off do bug DeBERTa upstream.
+
+**Decisão de execução noturna:**
+- Treino baseline: 2M triples (BM25 official triples), ~$3. Cabe em $20 com folga.
+- Eval: opcional via Quati / mMARCO dev sample.
+- Sem hardneg mining (mineração full requer FAISS 27GB índice, não cabe nos 20GB disk; e mining é cara). Hardneg fica para próxima rodada.
+
+**Stack final que funcionou:**
+- Runpod RTX 4090 Community Cloud sm_89
+- runpod/pytorch:2.4 base → upgraded to torch 2.6.0+cu124 / torchvision 0.21
+- transformers 4.57.6 (pinned <5)
+- sentence-transformers 5.x trainer
+- BinaryCrossEntropyLoss
+- mixed_precision: fp32 forced for Albertina (DeBERTa-family)
+
+---
+
 <!-- Template para próximas entradas:
 
 ## YYYY-MM-DD — Título curto
