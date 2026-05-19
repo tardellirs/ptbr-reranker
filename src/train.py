@@ -165,12 +165,16 @@ def resolve_device(requested: str) -> str:
     PyTorch build there only ships kernels for sm_70+, so the model forward
     eventually crashes inside DeBERTa attention. Check compute capability
     explicitly and fall back to CPU when below the supported floor.
+
+    On Apple Silicon, ``"auto"`` prefers MPS over CPU when CUDA is absent.
     """
     if requested == "cpu":
         return "cpu"
     if requested not in ("auto", "cuda"):
         return requested
     if not torch.cuda.is_available():
+        if torch.backends.mps.is_available():
+            return "mps"
         return "cpu"
     try:
         capability = torch.cuda.get_device_capability(0)
