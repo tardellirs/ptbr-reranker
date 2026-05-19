@@ -281,6 +281,48 @@ https://www.kaggle.com/code/tardellistekel/ptbr-reranker-phase-2-hard-negative-m
 
 ---
 
+## 2026-05-18 — Phase 3 implementada: `src/train.py` funcional
+
+**Hipótese:** Implementar treino real do cross-encoder usando sentence-transformers v5 (HF Trainer-style API) com W&B logging, codecarbon e checkpointing.
+
+**O que fiz:**
+- Substituí o skeleton de `src/train.py` por uma pipeline completa:
+  - `TrainConfig` dataclass com defaults sensatos + `from_yaml()` parser (coerção defensiva de scalars YAML para float, p.ex. `1e-5` que YAML 1.2 parseia como string).
+  - `triples_to_pairs()` expande o parquet `(query, positive, negative)` em `(sentence_A, sentence_B, label)` com label ∈ {1.0, 0.0}.
+  - `train()` carrega Albertina, treina com `CrossEncoderTrainer` + `BinaryCrossEntropyLoss`, salva checkpoint `runs/<...>/best/`, persiste config em `training_config.json` para reprodutibilidade.
+  - W&B opcional (`wandb_project` em yaml ativa) com tags e config completa serializada.
+  - codecarbon opcional, best-effort. Loga emissões em `output_dir/emissions.csv` para a seção Environmental Impact do paper.
+  - Device autodetect com fallback CPU (mesmo helper de `mine_hard_negatives.py`).
+- Adicionei 8 testes em `tests/test_train_pipeline.py`:
+  - 4 unit tests para `triples_to_pairs` (count, labels, query repeat, order)
+  - 1 para `set_seed` (determinismo)
+  - 1 para `resolve_device("cpu")`
+  - 1 para `TrainConfig.from_yaml` (coerção de tipos)
+  - 1 **slow smoke test** end-to-end em CPU com Albertina-100m real, 4 triples sintéticos, 2 steps, salva checkpoint
+
+**Resultado:**
+- 19 testes passando (não-slow), 1 passando com marker slow.
+- Lint, format, mypy strict: todos limpos em 12 arquivos.
+- Smoke test em CPU: **45s** (download de Albertina + treino + checkpoint).
+- `runs/best/` é gravado, `training_config.json` também (artefato de reprodutibilidade).
+
+**Decisões importantes:**
+- Loss escolhida: `BinaryCrossEntropyLoss` (pairwise BCE). Comparado a alternativas:
+  - `MarginMSELoss`: precisa de teacher scores (não temos).
+  - `MultipleNegativesRankingLoss`: bi-encoder, não cross-encoder.
+  - `ListMLELoss/LambdaLoss`: listwise, precisa de múltiplos negativos por query num único exemplo (poderia, mas BCE é mais simples).
+  - BCE é a forma canônica em monoBERT / msmarco-MiniLM. Decisão registrada para o paper.
+- Mixed precision automático: bf16 em CUDA (mais estável que fp16), float32 em CPU.
+- `gradient_checkpointing` disponível via config (útil em A100 ↔ batch maior).
+
+**TODO próxima sessão:**
+- Criar projeto W&B `ptbr-reranker` e configurar API key.
+- Notebook Kaggle Phase 3 (treino sintético em CPU/T4 — só para validar pipeline end-to-end de Phase 1+2+3).
+- Rotar token Kaggle (exposto em conversa).
+- Pensar em modo `--full` no Runpod (custo: ~$45 em A100 SXM Community para 30h).
+
+---
+
 <!-- Template para próximas entradas:
 
 ## YYYY-MM-DD — Título curto
