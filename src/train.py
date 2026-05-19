@@ -103,6 +103,58 @@ def set_seed(seed: int) -> None:
     torch.cuda.manual_seed_all(seed)
 
 
+def patch_deberta_attention_dtype() -> bool:
+    """In-place patch transformers DeBERTa attention so mixed precision works.
+
+    Upstream uses ``torch.finfo(query_layer.dtype).min`` in the attention mask
+    fill, which overflows the destination dtype under autocast (the query
+    stays fp32 while attention_scores moves to bf16/fp16). The robust upstream
+    fix would be to use ``finfo(attention_scores.dtype).min`` — that's exactly
+    what this helper does on disk, idempotently, before training imports
+    transformers. Returns True if the patch was applied or already in place.
+    """
+    try:
+        import transformers.models.deberta.modeling_deberta as _deberta_mod
+    except Exception as exc:  # pragma: no cover - only fires if transformers absent
+        logger.warning("Could not import transformers DeBERTa to patch: %s", exc)
+        return False
+
+    fpath = Path(_deberta_mod.__file__)
+    try:
+        content = fpath.read_text()
+    except OSError as exc:  # pragma: no cover - file not writable
+        logger.warning("Could not read %s for patching: %s", fpath, exc)
+        return False
+
+    needle = "finfo(query_layer.dtype).min"
+    replacement = "finfo(attention_scores.dtype).min"
+
+    if needle not in content:
+        if replacement in content:
+            logger.info("DeBERTa attention already patched for mixed precision.")
+            return True
+        logger.info("DeBERTa attention does not require the dtype patch.")
+        return False
+
+    patched = content.replace(needle, replacement)
+    try:
+        fpath.write_text(patched)
+    except OSError as exc:  # pragma: no cover - file not writable
+        logger.warning("Could not write patched DeBERTa at %s: %s", fpath, exc)
+        return False
+
+    # Invalidate any already-imported submodules so the next import re-reads disk.
+    import importlib
+    import sys
+
+    for mod_name in list(sys.modules.keys()):
+        if "transformers.models.deberta" in mod_name:
+            sys.modules.pop(mod_name, None)
+    importlib.invalidate_caches()
+    logger.info("Patched DeBERTa attention at %s for mixed precision.", fpath)
+    return True
+
+
 MIN_CUDA_CAPABILITY = (7, 0)
 
 
@@ -256,6 +308,7 @@ def train(
     )
 
     set_seed(config.seed)
+    patch_deberta_attention_dtype()
     resolved_device = resolve_device(config.device)
     logger.info("Resolved device: %s (requested=%s)", resolved_device, config.device)
 
@@ -302,23 +355,7 @@ def train(
         "gradient_checkpointing": config.gradient_checkpointing,
         "report_to": ["wandb"] if wandb_active else "none",
     }
-    # DeBERTa attention uses ``finfo(query_layer.dtype).min`` in masked_fill.
-    # Under autocast, query_layer stays fp32 while attention_scores becomes
-    # the mixed-precision dtype (fp16/bf16), so the finfo(fp32) value
-    # overflows the destination dtype. This affects every transformers
-    # release that ships the current DeBERTa implementation. The robust
-    # workaround is to disable mixed precision when the base model is
-    # DeBERTa-family. On an RTX 4090 in fp32 the throughput is acceptable
-    # for our ~110M cross-encoder.
-    base = config.base_model.lower()
-    is_deberta_family = "albertina" in base or "deberta" in base
-    if is_deberta_family and config.mixed_precision != "no":
-        logger.warning(
-            "DeBERTa-family base model detected with mixed_precision=%r; "
-            "forcing fp32 to avoid an upstream attention overflow.",
-            config.mixed_precision,
-        )
-    elif config.mixed_precision == "bf16" and resolved_device == "cuda":
+    if config.mixed_precision == "bf16" and resolved_device == "cuda":
         args_kwargs["bf16"] = True
     elif config.mixed_precision == "fp16" and resolved_device == "cuda":
         args_kwargs["fp16"] = True
