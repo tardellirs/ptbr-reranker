@@ -62,13 +62,18 @@ def _load_bm25_run(
     with run_path.open() as fh:
         for line in fh:
             parts = line.split()
-            if len(parts) < 6:
+            # Two formats observed in the wild:
+            # - TREC 6-col: ``qid Q0 docid rank score tag``
+            # - Anserini/pyserini 3-col: ``qid docid rank`` (used by mMARCO's
+            #   data/google/runs/run.bm25_portuguese-msmarco.txt)
+            if len(parts) >= 6:
+                qid, did, rank = parts[0], parts[2], int(parts[3])
+            elif len(parts) == 3:
+                qid, did, rank = parts[0], parts[1], int(parts[2])
+            else:
                 continue
-            qid = parts[0]
             if qid not in query_ids:
                 continue
-            rank = int(parts[3])
-            did = parts[2]
             by_qid[qid].append((rank, did))
     out: dict[str, list[str]] = {}
     for qid, pairs in by_qid.items():
