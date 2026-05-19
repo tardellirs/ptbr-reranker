@@ -444,16 +444,18 @@ https://www.kaggle.com/code/tardellistekel/ptbr-reranker-phase-2-hard-negative-m
 
 **Resultado:**
 
-| Métrica | v0.1 | Referência |
+| Métrica | v0.1 | Referência (Unicamp-DL/mMARCO README, PT) |
 |---|---|---|
-| **MRR@10** | **0.2810** | BM25 ~0.18 · mMiniLM ~0.30 · BGE-v2-m3 ~0.35-0.38 |
-| **nDCG@10** | **0.3232** | — |
+| **MRR@10** | **0.2810** | BM25 0.152 · mMiniLM-multi 0.277 · mMiniLM-en-pt 0.299 · ptT5-base-pt 0.299 · mT5-base-en-pt **0.306** |
+| **nDCG@10** | **0.3232** | — (Unicamp-DL não reporta) |
 | MAP | 0.2808 | — |
 | Recall@100 | 0.5566 | (= R@1000, capado a top-100 BM25) |
 | num_queries | 6 980 | full dev split mMARCO-PT |
 
-- **+10 pp sobre BM25 puro**, **empata com mMiniLM-L12 multilingual** (5+ línguas, mais dados, mais parâmetros).
-- Atrás de BGE-reranker-v2-m3 mas com **5.7× menos parâmetros** — esperado.
+- **+13 pp sobre BM25** (0.281 vs 0.152).
+- **Empata/supera os mMiniLMs do Unicamp-DL** (0.277-0.299) já no v0.1.
+- **2-3 pp abaixo dos mT5-base** (0.302-0.306) — gap esperado (mT5 é 220M, encoder-decoder).
+- Caveat de protocolo: Unicamp-DL reranqueia **top-1000 BM25**, nós **top-100**. Top-1000 desloca MRR@10 em +0.5 a +2 pp. Pra paper, rodar comparação direta em top-1000 quando v1.0 estiver pronto.
 - Artefatos em `outputs/v0.1/`: `eval_mmarco_v0.1.json`, `_per_query.parquet` (para bootstrap CIs), `_rerank.parquet` (scores brutos).
 
 **Decisão:**
