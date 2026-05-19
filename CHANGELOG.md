@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Trained
+- **First checkpoint v0.1 produced 2026-05-19**: Albertina-100m + 2M BM25-mined triples from mMARCO-PT, 1 epoch, bs=64 effective, max_len=256, bf16. Trained on Runpod RTX 4090 Community Cloud in **5h52min** for ~$2.00, loss 0.69 → 0.127 (5.4× reduction). 2.65 kWh / 1.70 kg CO2eq (Taiwan, Taoyuan, PUE 1.0). Checkpoint saved at runs/baseline_2M/best/. Public release deferred to v1.0 after evaluation passes.
+
 ### Added
 - Initial project scaffolding: pyproject.toml, ruff/mypy/pytest config, pre-commit hooks.
 - Repository governance: LICENSE (MIT), CITATION.cff, CONTRIBUTING.md, CODE_OF_CONDUCT.md.

@@ -376,6 +376,34 @@ https://www.kaggle.com/code/tardellistekel/ptbr-reranker-phase-2-hard-negative-m
 - Estimativa: 6h, $2 GPU
 - PID 8197, log em `logs/train_2M.log`
 
+**Treino concluído 2026-05-19 08:32 UTC:**
+
+| Métrica | Valor |
+|---|---|
+| Duração | **5h 52min** (21,147s) |
+| Steps | 62,500 (1 epoch completo) |
+| Throughput | 2.96 sps |
+| Loss inicial | 0.6928 |
+| Loss média treino | 0.1922 |
+| **Loss final** | **0.127** (5.4× redução) |
+| GPU util | 91.3% |
+| GPU power avg | 339W |
+| **Energy** | **2.65 kWh** |
+| **CO2eq** | **1.70 kg** (Taiwan, Taoyuan, PUE 1.0) |
+| Cost | ~$2.00 ($0.34/h × 5.87h) |
+| Output | runs/baseline_2M/best/ (~557MB safetensors) |
+
+**Trajectory de loss:**
+- step 0 → 0.69 (random init)
+- step 5000 → 0.25
+- step 15000 → 0.21
+- step 25000 → 0.19
+- step 35000 → 0.171
+- step 50000 → 0.144
+- step 62500 → 0.127 (final)
+
+**Modelo v0.1 pronto** — primeiro checkpoint utilizável publicável. Tempo total da rodada Runpod (incluindo setup, fixes, build_triples, treino): ~6h 30min, custo ~$2.20.
+
 ---
 
 <!-- Template para próximas entradas:
