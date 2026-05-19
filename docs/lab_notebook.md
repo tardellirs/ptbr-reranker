@@ -240,6 +240,47 @@ https://www.kaggle.com/code/tardellistekel/ptbr-reranker-phase-1-validation
 
 ---
 
+## 2026-05-18 — Validação Phase 2 no Kaggle (4 tentativas)
+
+**Hipótese:** Validar mine_hard_negatives + build_triples end-to-end no Kaggle free tier.
+
+**4 versões do kernel, 3 problemas diferentes descobertos:**
+
+| Versão | Falha | Causa raiz | Fix |
+|---|---|---|---|
+| v1 | CUDA error sm_60 | Kaggle alocou Tesla P100 (sm_6.0), PyTorch só suporta sm_70+ | `resolve_device()` probe + CPU fallback |
+| v2 | Mesmo problema | Kernel rodou com código v1 (sem probe) e bug em `check()` confundia qrels/triples com queries | (a) check() qualifica por config; (b) check pré-existente passou em CPU |
+| v3 | build_triples 0 rows | Triples oficiais MS MARCO referenciam PIDs 0..8.8M, mas slice --small tem 0..9999 — intersecção estatística ≈ 0 | (a) build_triples agora `raise` em 0 rows; (b) notebook substitui baseline build por inspeção TSV |
+| v4 | **COMPLETE** | — | mining filtra positives por collection + qrels sintéticos alinhados |
+
+**Resultado final (v4):**
+- Mining: **100 triples** (skipped_no_qrel=0, skipped_pool=0).
+- Build_triples hardneg: **500 triples** (100 queries × 5 negs/query), schema correto `(query_id, query_text, positive_text, negative_text)`, dropped=0.
+- Pipeline completo no Kaggle free tier (CPU): download → sintético qrels → Serafim encoding → FAISS HNSW → mining → build_triples.
+- Tempo total: ~22min (~20min só no encoding CPU; T4 daria <1min).
+
+**Decisões importantes registradas:**
+- Em ambientes Kaggle/Colab/shared, **probe CUDA antes de usar** (alguns sm_xx não são suportados pelo PyTorch da imagem). Padrão: `resolve_device("auto")` em todos os scripts GPU.
+- `--small` mode é validação de **code path**, não validação de **qualidade de dados**. Para mineração real (qrels.dev.small.tsv com PIDs reais), precisa `--full` ou alignment-aware download. Documentado em README do notebook.
+- **Qrels sintéticos** são uma técnica válida para CI/free-tier testing: alinham IDs por construção, exercitam todo o pipeline, mas não geram triples semanticamente relevantes. Não usar para treinar modelo final.
+- Invariante novo em mining: `mine_hard_negatives` só emite positives que estão na collection. Previne silent failures downstream.
+
+**Pegadas didáticas:**
+- Kaggle aloca GPU disponível (frequentemente P100, não T4) sem opção pela API. Para garantir T4 precisa configurar no UI manualmente.
+- `build_triples` deve sempre erros em 0 rows com mensagem descritiva — silent failures são piores que crashes.
+- Ordem de descoberta de bugs: device → check() → alignment de IDs. Cada fix expôs o próximo problema. CI helps, mas validação real só com dados reais.
+
+**Kernel público (4 versões):**
+https://www.kaggle.com/code/tardellistekel/ptbr-reranker-phase-2-hard-negative-mining
+
+**TODO próxima sessão:**
+- Phase 3: implementar `src/train.py` (CrossEncoder fit loop com W&B).
+- Criar projeto W&B `ptbr-reranker`.
+- Rotar token Kaggle (exposto em conversa).
+- Considerar: refatorar `--small` para alignment-aware (download positives das qrels.dev.small) → mining real validado em free tier. Custo: tempo de refactor vs valor para o paper.
+
+---
+
 <!-- Template para próximas entradas:
 
 ## YYYY-MM-DD — Título curto

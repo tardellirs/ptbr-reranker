@@ -39,6 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `data/build_triples.py` functional — consumes (a) the official MS MARCO `triples.train.ids.small.tsv` (39M BM25-mined triples, our baseline) and/or (b) mined hard negatives from Phase 2, weighted via `mix_ratio_official`. Outputs full text triples ready for `src/train.py`.
 - `data/download_mmarco.py` extended to pull qrels (`data/qrels.dev.small.tsv`) and the official training triples from the mMARCO main branch (TSV, language-agnostic, IDs shared across translations).
 - Bibliography updated with Quati (arXiv:2404.06976) and JurisTCU (arXiv:2503.08379) entries.
+- Phase 2 validated end-to-end on Kaggle free tier (v4 kernel after iterating through P100/sm_60 incompatibility, check() bug, ID-alignment failure). Mining produced 100 triples, build_triples produced 500 final rows with the correct schema; kernel public at https://www.kaggle.com/code/tardellistekel/ptbr-reranker-phase-2-hard-negative-mining.
+- Robustness fixes captured along the way: (a) `resolve_device("auto")` probe in mining to fall back to CPU when CUDA is advertised but unusable (e.g. Kaggle's P100 paired with a sm_70+ PyTorch); (b) mining filters qrel positives by collection membership to prevent silent downstream drops; (c) `build_triples` now raises a descriptive RuntimeError on 0 emitted rows instead of silently writing nothing.
 
 ## [0.1.0] - 2026-05-18
 
