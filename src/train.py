@@ -302,21 +302,24 @@ def train(
         "gradient_checkpointing": config.gradient_checkpointing,
         "report_to": ["wandb"] if wandb_active else "none",
     }
-    # DeBERTa + bf16 hits an upstream overflow in transformers 5.x because
-    # attention_scores.masked_fill uses finfo(query_layer.dtype).min which
-    # overflows bfloat16 when query_layer is autocast-promoted to fp32.
-    # Prefer fp16 on Albertina (sm_75+ has full FP16 tensor cores).
+    # DeBERTa attention uses ``finfo(query_layer.dtype).min`` in masked_fill.
+    # Under autocast, query_layer stays fp32 while attention_scores becomes
+    # the mixed-precision dtype (fp16/bf16), so the finfo(fp32) value
+    # overflows the destination dtype. This affects every transformers
+    # release that ships the current DeBERTa implementation. The robust
+    # workaround is to disable mixed precision when the base model is
+    # DeBERTa-family. On an RTX 4090 in fp32 the throughput is acceptable
+    # for our ~110M cross-encoder.
     base = config.base_model.lower()
     is_deberta_family = "albertina" in base or "deberta" in base
-    if config.mixed_precision == "bf16" and resolved_device == "cuda":
-        if is_deberta_family:
-            logger.warning(
-                "DeBERTa-family base model detected with bf16; switching to fp16 "
-                "to avoid an upstream attention overflow."
-            )
-            args_kwargs["fp16"] = True
-        else:
-            args_kwargs["bf16"] = True
+    if is_deberta_family and config.mixed_precision != "no":
+        logger.warning(
+            "DeBERTa-family base model detected with mixed_precision=%r; "
+            "forcing fp32 to avoid an upstream attention overflow.",
+            config.mixed_precision,
+        )
+    elif config.mixed_precision == "bf16" and resolved_device == "cuda":
+        args_kwargs["bf16"] = True
     elif config.mixed_precision == "fp16" and resolved_device == "cuda":
         args_kwargs["fp16"] = True
     if max_steps is not None:
