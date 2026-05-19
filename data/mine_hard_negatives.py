@@ -221,14 +221,27 @@ def mine(
     logger.info("Searching top-%d for %d queries", config.top_k, len(query_texts))
     _, neighbor_rows = index.search(query_emb, config.top_k)
 
+    # Positives must be present in our collection — otherwise downstream
+    # build_triples cannot resolve the positive_id to text. In a full-mode
+    # run the collection covers all passages and this is a no-op; in
+    # --small mode where collection is a slice, this filter excludes
+    # queries whose only positives sit outside the slice.
+    collection_pids_set: set[int] = {int(p) for p in pid_by_row.tolist()}
+
     rows_out: list[dict[str, object]] = []
     skipped_no_qrel = 0
     skipped_insufficient_pool = 0
+    skipped_positive_not_in_collection = 0
 
     for q_idx, qid in enumerate(qid_by_row.tolist()):
         positives = qrels.get(int(qid))
         if not positives:
             skipped_no_qrel += 1
+            continue
+
+        present_positives = [p for p in positives if p in collection_pids_set]
+        if not present_positives:
+            skipped_positive_not_in_collection += 1
             continue
 
         candidate_rows = neighbor_rows[q_idx]
@@ -249,7 +262,7 @@ def mine(
         negatives = rng.sample(windowed, config.num_negatives)
 
         # Emit one row per known positive — the same negatives are reused.
-        for pos_pid in positives:
+        for pos_pid in present_positives:
             rows_out.append(
                 {
                     "query_id": int(qid),
@@ -260,15 +273,24 @@ def mine(
 
         if (q_idx + 1) % 10_000 == 0:
             logger.info(
-                "Mined %d/%d queries (skipped_no_qrel=%d, skipped_pool=%d)",
+                "Mined %d/%d queries "
+                "(skipped_no_qrel=%d, skipped_pool=%d, skipped_pos_off_collection=%d)",
                 q_idx + 1,
                 len(qid_by_row),
                 skipped_no_qrel,
                 skipped_insufficient_pool,
+                skipped_positive_not_in_collection,
             )
 
     if not rows_out:
-        raise RuntimeError("No triples mined; check qrels coverage and parameters.")
+        raise RuntimeError(
+            f"No triples mined. Stats: skipped_no_qrel={skipped_no_qrel}, "
+            f"skipped_pool={skipped_insufficient_pool}, "
+            f"skipped_pos_off_collection={skipped_positive_not_in_collection}. "
+            "In --small mode the slice of the collection rarely intersects the "
+            "qrels positives — this is expected; full-mode mining is needed for "
+            "end-to-end validation."
+        )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     table = pa.Table.from_pylist(rows_out)
