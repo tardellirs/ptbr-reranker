@@ -182,7 +182,12 @@ def encode_collection(
     batch_size: int = DEFAULT_ENCODE_BATCH_SIZE,
     device: str | None = None,
 ) -> np.ndarray:
-    """Encode passages with the bi-encoder. Returns ``(N, dim)`` float32 array."""
+    """Encode passages with the bi-encoder. Returns ``(N, dim)`` float32 array.
+
+    For small inputs this just calls ``model.encode`` once. Prefer
+    ``encode_collection_streaming`` for the full mMARCO-PT collection
+    (8.8M passages would otherwise need ~27 GB of RAM at the final stack).
+    """
     from sentence_transformers import SentenceTransformer
 
     model = SentenceTransformer(biencoder, device=device)
@@ -194,6 +199,78 @@ def encode_collection(
         show_progress_bar=True,
     )
     return np.asarray(embeddings, dtype=np.float32)
+
+
+def encode_collection_streaming(
+    biencoder: str,
+    texts: list[str],
+    output_path: Path,
+    *,
+    batch_size: int = DEFAULT_ENCODE_BATCH_SIZE,
+    chunk_size: int = 500_000,
+    device: str | None = None,
+) -> np.memmap:
+    """Encode passages chunk-by-chunk to a memmap'd .npy on disk.
+
+    ``model.encode()`` accumulates every batch into a single in-memory list
+    before stacking, so calling it on 8.8 M passages allocates ~27 GB of
+    Python objects + one final 27 GB ndarray simultaneously. On a 32 GB
+    container that overshoots the cgroup limit and the OOM killer fires
+    (seen on Salad node, 2026-05-20). Encoding in ``chunk_size`` slices
+    bounds peak RAM at one chunk (~1.5 GB) and writes each chunk straight
+    into a numpy memmap so the FAISS index step can mmap-read it back.
+    """
+    import struct
+
+    from sentence_transformers import SentenceTransformer
+
+    n = len(texts)
+    model = SentenceTransformer(biencoder, device=device)
+    # Probe dimensionality with a single tiny encode.
+    probe = np.asarray(
+        model.encode(
+            texts[: min(2, n)],
+            batch_size=2,
+            normalize_embeddings=True,
+            convert_to_numpy=True,
+            show_progress_bar=False,
+        ),
+        dtype=np.float32,
+    )
+    dim = probe.shape[1]
+    logger.info(
+        "Streaming encode: n=%d chunks of %d, dim=%d -> %s (%.1f GB on disk)",
+        n,
+        chunk_size,
+        dim,
+        output_path,
+        n * dim * 4 / 1024**3,
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    arr = np.memmap(output_path, dtype=np.float32, mode="w+", shape=(n, dim))
+    arr[: probe.shape[0]] = probe
+    written = probe.shape[0]
+    for start in range(written, n, chunk_size):
+        end = min(start + chunk_size, n)
+        chunk_emb = np.asarray(
+            model.encode(
+                texts[start:end],
+                batch_size=batch_size,
+                normalize_embeddings=True,
+                convert_to_numpy=True,
+                show_progress_bar=False,
+            ),
+            dtype=np.float32,
+        )
+        arr[start:end] = chunk_emb
+        arr.flush()
+        del chunk_emb
+        logger.info("Streaming encode: %d / %d passages done", end, n)
+    # Persist a tiny shape sidecar so the consumer can read without
+    # re-running the dim probe.
+    shape_file = output_path.with_suffix(output_path.suffix + ".shape")
+    shape_file.write_bytes(struct.pack("<qq", n, dim))
+    return arr
 
 
 def build_index(embeddings: np.ndarray, *, index_type: str = "hnsw") -> faiss.Index:
@@ -258,29 +335,34 @@ def mine(
 
     # Disk-backed caches for each expensive phase. On retry after a pod
     # eviction these files let us skip the 3+ hour collection encode and
-    # 10+ min FAISS build entirely.
-    cache_passage = output_path.with_suffix(".cache.passage_emb.npy")
+    # 10+ min FAISS build entirely. Passage embeddings use a raw memmap
+    # binary (.bin) instead of .npy so they never have to be fully loaded
+    # into RAM — the FAISS step also reads them via memmap.
+    cache_passage = output_path.with_suffix(".cache.passage_emb.bin")
+    cache_passage_shape = output_path.with_suffix(".cache.passage_emb.bin.shape")
     cache_query = output_path.with_suffix(".cache.query_emb.npy")
     cache_index = output_path.with_suffix(".cache.faiss.bin")
 
-    if cache_passage.exists():
-        logger.info("Loading cached passage embeddings from %s", cache_passage)
-        passage_emb = np.load(cache_passage)
+    if cache_passage.exists() and cache_passage_shape.exists():
+        logger.info("Loading cached passage embeddings (memmap) from %s", cache_passage)
+        import struct as _struct
+
+        n_p, dim_p = _struct.unpack("<qq", cache_passage_shape.read_bytes())
+        passage_emb = np.memmap(cache_passage, dtype=np.float32, mode="r", shape=(n_p, dim_p))
     else:
-        logger.info("Encoding collection with %s", config.biencoder)
-        passage_emb = encode_collection(
+        logger.info("Encoding collection (streaming) with %s", config.biencoder)
+        passage_emb = encode_collection_streaming(
             config.biencoder,
             passage_texts,
+            cache_passage,
             batch_size=config.encode_batch_size,
+            chunk_size=500_000,
             device=resolved_device,
         )
-        tmp = cache_passage.with_suffix(cache_passage.suffix + ".tmp")
-        np.save(tmp, passage_emb)
-        tmp.replace(cache_passage)
         logger.info(
-            "Cached passage embeddings to %s (%.1f MB)",
+            "Cached passage embeddings to %s (%.1f GB)",
             cache_passage,
-            cache_passage.stat().st_size / 1024 / 1024,
+            cache_passage.stat().st_size / 1024**3,
         )
 
     import faiss as _faiss
