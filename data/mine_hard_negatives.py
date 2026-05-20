@@ -151,6 +151,30 @@ def _load_qrels(qrels_path: Path) -> dict[int, set[int]]:
     return qrels
 
 
+def _load_positives_from_triples(triples_tsv: Path) -> dict[int, set[int]]:
+    """Extract ``query_id -> {positive_id}`` from a 3-col MS MARCO triples TSV.
+
+    mMARCO ships only ``triples.train.ids.small.tsv`` (``qid pos_pid neg_pid``)
+    for the training split, not a TREC-style qrels.train file. This helper
+    rebuilds the positives set from those triples so the mining pipeline
+    can run on the training queries without an extra format-conversion step.
+    """
+    positives: dict[int, set[int]] = {}
+    with triples_tsv.open() as fh:
+        for line in fh:
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) != 3:
+                continue
+            qid, pos_pid, _ = parts
+            positives.setdefault(int(qid), set()).add(int(pos_pid))
+    logger.info(
+        "Loaded positives for %d queries from %s (extracted from triples)",
+        len(positives),
+        triples_tsv,
+    )
+    return positives
+
+
 def encode_collection(
     biencoder: str,
     texts: list[str],
@@ -193,20 +217,31 @@ def build_index(embeddings: np.ndarray, *, index_type: str = "hnsw") -> faiss.In
 def mine(
     config: MiningConfig,
     queries_path: Path,
-    qrels_path: Path,
+    qrels_path: Path | None,
     collection_path: Path,
     output_path: Path,
     *,
     index_type: str = "hnsw",
     device: str | None = None,
+    positives_from_triples: Path | None = None,
 ) -> int:
     """Mine hard negatives and write triples to parquet.
+
+    Exactly one of ``qrels_path`` (TREC qrels file) or
+    ``positives_from_triples`` (a 3-col MS MARCO triples TSV — used for
+    the training split since mMARCO ships no qrels.train) must be set.
 
     Returns the number of (query, positive, negatives) rows written.
     """
     import pyarrow as pa
     import pyarrow.parquet as pq
     from sentence_transformers import SentenceTransformer
+
+    if (qrels_path is None) == (positives_from_triples is None):
+        raise ValueError(
+            "Pass exactly one of --qrels (TREC qrels file) or "
+            "--positives-from-triples (MS MARCO triples TSV)."
+        )
 
     rng = random.Random(config.seed)
 
@@ -215,7 +250,11 @@ def mine(
 
     pid_by_row, passage_texts = _load_collection(collection_path)
     qid_by_row, query_texts = _load_queries(queries_path)
-    qrels = _load_qrels(qrels_path)
+    qrels = (
+        _load_qrels(qrels_path)
+        if qrels_path is not None
+        else _load_positives_from_triples(positives_from_triples)  # type: ignore[arg-type]
+    )
 
     logger.info("Encoding collection with %s", config.biencoder)
     passage_emb = encode_collection(
@@ -336,7 +375,19 @@ def main() -> None:
         type=Path,
         default=Path("data/raw/mmarco/queries_train_portuguese.parquet"),
     )
-    parser.add_argument("--qrels", type=Path, default=Path("data/raw/mmarco/qrels.dev.small.tsv"))
+    parser.add_argument(
+        "--qrels",
+        type=Path,
+        default=None,
+        help="TREC qrels TSV (qid 0 pid rel). Mutually exclusive with --positives-from-triples.",
+    )
+    parser.add_argument(
+        "--positives-from-triples",
+        type=Path,
+        default=None,
+        help="3-col MS MARCO triples TSV (qid pos_pid neg_pid) — used for "
+        "the training split since mMARCO ships no qrels.train file.",
+    )
     parser.add_argument(
         "--output", type=Path, default=Path("data/processed/hard_negatives.parquet")
     )
@@ -374,6 +425,7 @@ def main() -> None:
         args.output,
         index_type=args.index_type,
         device=args.device,
+        positives_from_triples=args.positives_from_triples,
     )
 
 
