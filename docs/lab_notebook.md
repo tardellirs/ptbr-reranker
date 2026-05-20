@@ -6,6 +6,65 @@ Princípio: se não está aqui, não aconteceu. O paper sai daqui.
 
 ---
 
+## 2026-05-20 — v0.1 vs v1.0 top-1000 head-to-head em mMARCO-PT dev
+
+**Hipótese a testar:** v1.0 (10M triples) deveria superar v0.1 (2M triples) em ≥ 3pp MRR@10 — justificando o gasto extra de GPU (5× mais dados).
+
+**O que foi feito:**
+- Treino v1.0 completou (1 época, 312.5k steps, train_loss final 0.0159 vs v0.1 0.127). Migração mid-flight da conta1 (Secure 5090, terminou crédito) para conta2 (Secure 5090) via HF Hub: push do checkpoint-240000, resume com `--resume-from-checkpoint` (flag novo, commit `75f92a6`). Smoke-test 50 steps confirmou optimizer/RNG restaurados antes do full run.
+- Eval `src.eval_mmarco --rerank-top-n 1000` em ambos checkpoints, **mesmo protocolo do Unicamp-DL**.
+- Artefatos persistidos em `tardellirs/ptbr-reranker-eval-results` (HF dataset privado) + `docs/paper_assets/`.
+
+**Resultado:**
+
+| | v0.1 (2M, top-1000) | v1.0 (10M, top-1000) | Δ |
+|---|---|---|---|
+| **MRR@10** | **0.2945** | **0.2876** | **-0.0069** |
+| **nDCG@10** | **0.3437** | **0.3385** | -0.0052 |
+| MAP | 0.2980 | 0.2915 | -0.0065 |
+| Recall@100 | 0.7055 | 0.7016 | -0.0039 |
+| Recall@1000 | 0.7442 | 0.7442 | 0.0000 |
+| num_queries | 6980 | 6980 | — |
+
+**5× mais dados PIOROU o modelo em todas as métricas de qualidade do top-10** (MRR@10, nDCG@10, MAP), enquanto Recall@1000 estagnou (BM25 retrieval ceiling). Hipóteses, em ordem de plausibilidade:
+
+1. **Saturação + ruído dos BM25 negatives**: 10M triples sem hard negative mining apenas adicionou exemplos similares aos que o modelo já distinguia bem. O sinal extra é ruído, não informação.
+2. **Loss colapsou para zero** (0.0159) bem antes do fim — modelo super-confiante em distinguir BM25 negatives, mas o que ele aprendeu não generaliza para ranking de candidatos de alta similaridade.
+3. **Variação estatística**: a diferença de -0.7pp pode estar dentro do CI 95% bootstrap. Precisa rodar `src.stats` no per-query parquet para confirmar.
+
+**Comparação com baselines Unicamp-DL** (top-1000, mMARCO-PT dev):
+
+| Modelo | Params | Treino | MRR@10 |
+|---|---|---|---|
+| BM25 (sem rerank) | — | — | 0.152 |
+| mMiniLM-en-msmarco | 117M | EN only | 0.277 |
+| mMiniLM-multi-msmarco | 117M | mMARCO multi | 0.277 |
+| **PTBR-Reranker v1.0** | **100M** | **10M PT BM25** | **0.2876** |
+| **PTBR-Reranker v0.1** | **100M** | **2M PT BM25** | **0.2945** |
+| ptT5-base-pt-msmarco | 220M | PT only | 0.299 |
+| mMiniLM-en-pt-msmarco | 117M | EN+PT | 0.299 |
+| mT5-base-multi-msmarco | 220M | mMARCO multi | 0.302 |
+| **mT5-base-en-pt-msmarco** | **220M** | **EN+PT** | **0.306** |
+
+Posicionamento real do nosso modelo: **acima dos mMiniLMs, na faixa dos ptT5/mT5-base PT-only**, com 2.2× menos parâmetros que os T5s.
+
+**Decisão:**
+- v0.1 é o checkpoint a ser publicado como **release principal** (vence v1.0 head-to-head). Modelo + tokenizer já em `tardellirs/ptbr-reranker-v0.1` (privado por enquanto).
+- v1.0 fica como **ablation** no paper (mostrar que escalar dados sem hard negatives não rende — achado relevante por si só).
+- **Próxima alavanca obrigatória é hard negatives** (mineração com Serafim-IR + retrain). Sem isso, a saturação fica.
+- Antes do release público: rodar `src.stats` bootstrap CI 95% pra publicar números com intervalo de confiança.
+
+**TODO:**
+- [x] Resultados em `outputs/v0.1_top1000/`, `outputs/v1.0_top1000/`, `tardellirs/ptbr-reranker-eval-results` (HF).
+- [x] Aggregate JSONs em `docs/paper_assets/{v0.1,v1.0}/`.
+- [x] Pods conta1 + conta2 terminados (saldos finais $1.42 + $0.70).
+- [ ] Bootstrap CI 95% (`src.stats`) sobre per-query parquets, atualizar tabela com intervalos.
+- [ ] Mineração de hard negatives (Serafim-IR + FAISS HNSW, ~$4 conta1+conta2 disponível).
+- [ ] Re-treino com hard negatives (v1.x) — esperar +3-5pp sobre v0.1.
+- [ ] Limpar `tardellirs/ptbr-reranker-v1.0-inprogress` no HF (13 × 1.6GB checkpoints intermediários, ~21GB) — manter só step 240000 e 312500 como referência.
+
+---
+
 ## 2026-05-18 — Kickoff
 
 **Hipótese:** A lacuna mais clara no ecossistema PT-BR é a ausência de um cross-encoder/reranker de qualidade pública. Bi-encoder existe (Serafim) mas pipeline de duas etapas está incompleta.

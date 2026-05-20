@@ -13,8 +13,9 @@ Toda run de treino, incluindo failures e debugging, vai aqui. Esta tabela vira o
 
 | ID | Data | Base | Dados | Loss | LR | Batch | Epochs | Max len | Seed | MRR@10 | nDCG@10 | MIRACL nDCG@10 | ECE | GPU·h | $ | Status | Notas |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| baseline_2M (v0.1) | 2026-05-19 | albertina-100m | mmarco 2M BM25-only | BinaryCE | 2e-5 | 32×2=64 | 1 | 256 | 42 | **0.2810** | **0.3232** | – | – | 4090 ~4.5h | ~$3.2 train+eval | keep | primeiro checkpoint publicável; sem hard negatives; eval na 4090 (28min, $0.32); artefatos em `outputs/v0.1/` |
-| baseline_10M (v1.0) | 2026-05-19/20 | albertina-100m | mmarco 10M BM25-only | BinaryCE | 2e-5 | 32×2=64 | 1 | 256 | 42 | – | – | – | – | 5090 ~19h (est.) | ~$13 train | running | 5× mais dados que v0.1; step 71k/312.5k às 15h45 do dia 19 |
+| baseline_2M (v0.1) — top-100 | 2026-05-19 | albertina-100m | mmarco 2M BM25-only | BinaryCE | 2e-5 | 32×2=64 | 1 | 256 | 42 | 0.2810 | 0.3232 | – | – | 4090 ~4.5h | ~$3.2 train+eval | keep | rerank top-100, 28min na 4090 |
+| baseline_2M (v0.1) — top-1000 | 2026-05-20 | albertina-100m | mmarco 2M BM25-only | BinaryCE | 2e-5 | 32×2=64 | 1 | 256 | 42 | **0.2945** | **0.3437** | – | – | 5090 ~4.7h | ~$4.7 eval | keep | mesmo checkpoint do top-100, eval top-1000 pra comparação direta com Unicamp-DL; **bate v1.0 head-to-head** |
+| baseline_10M (v1.0) — top-1000 | 2026-05-20 | albertina-100m | mmarco 10M BM25-only | BinaryCE | 2e-5 | 32×2=64 | 1 | 256 | 42 | 0.2876 | 0.3385 | – | – | 5090 ~19h+4h | ~$15 train+eval (cross-account) | discard | 5× mais dados → -0.7pp vs v0.1; train_loss colapsou (0.0159) — saturou sem hard negatives; mantido como ablation no paper |
 
 ## Ablations planejadas
 
