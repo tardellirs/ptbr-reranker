@@ -200,6 +200,25 @@ def evaluate(
     if resolved_device == "cpu":
         model.model.float()
 
+    rerank_dump_path = (
+        per_query_output.with_name(per_query_output.stem + "_rerank.parquet")
+        if per_query_output is not None
+        else None
+    )
+    if rerank_dump_path is not None:
+        rerank_dump_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _dump_rerank(rr: dict[str, dict[str, float]], path: Path) -> None:
+        """Write the full ``rerank_run`` dict as a long-format parquet."""
+        rows = [
+            {"qid": qid, "docid": did, "score": float(s)}
+            for qid, doc_scores in rr.items()
+            for did, s in doc_scores.items()
+        ]
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        pq.write_table(pa.Table.from_pylist(rows), tmp)  # type: ignore[no-untyped-call]
+        tmp.replace(path)
+
     rerank_run: dict[str, dict[str, float]] = {}
     for idx, qid in enumerate(sorted(qids, key=int), start=1):
         cands = bm25.get(qid, [])
@@ -210,20 +229,24 @@ def evaluate(
         rerank_run[qid] = dict(zip(cands, scores.tolist(), strict=True))
         if idx % 500 == 0:
             logger.info("Reranked %d / %d queries", idx, len(qids))
+            # Incremental dump every 500 queries. The whole rerank takes
+            # several hours; if a pod is evicted or runs out of credit
+            # before the final dump, we'd lose the entire inference. Atomic
+            # rename keeps the on-disk file always valid.
+            if rerank_dump_path is not None:
+                _dump_rerank(rerank_run, rerank_dump_path)
+                logger.info(
+                    "Checkpointed rerank scores to %s (%d queries)",
+                    rerank_dump_path,
+                    len(rerank_run),
+                )
 
     # Persist raw rerank scores BEFORE metric computation. A bug in metric
     # naming previously discarded a full inference pass; with this dump
     # ``src.score_rerank`` (or any ad-hoc script) can recompute metrics
     # offline without re-running the model.
-    if per_query_output is not None:
-        rerank_dump_path = per_query_output.with_name(per_query_output.stem + "_rerank.parquet")
-        rerank_dump_path.parent.mkdir(parents=True, exist_ok=True)
-        dump_rows = [
-            {"qid": qid, "docid": did, "score": float(s)}
-            for qid, doc_scores in rerank_run.items()
-            for did, s in doc_scores.items()
-        ]
-        pq.write_table(pa.Table.from_pylist(dump_rows), rerank_dump_path)  # type: ignore[no-untyped-call]
+    if rerank_dump_path is not None:
+        _dump_rerank(rerank_run, rerank_dump_path)
         logger.info("Wrote raw rerank scores to %s", rerank_dump_path)
 
     # pytrec_eval normaliza nomes: ``ndcg_cut.10`` -> ``ndcg_cut_10``.
