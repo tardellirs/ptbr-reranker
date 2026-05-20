@@ -256,24 +256,62 @@ def mine(
         else _load_positives_from_triples(positives_from_triples)  # type: ignore[arg-type]
     )
 
-    logger.info("Encoding collection with %s", config.biencoder)
-    passage_emb = encode_collection(
-        config.biencoder,
-        passage_texts,
-        batch_size=config.encode_batch_size,
-        device=resolved_device,
-    )
-    index = build_index(passage_emb, index_type=index_type)
+    # Disk-backed caches for each expensive phase. On retry after a pod
+    # eviction these files let us skip the 3+ hour collection encode and
+    # 10+ min FAISS build entirely.
+    cache_passage = output_path.with_suffix(".cache.passage_emb.npy")
+    cache_query = output_path.with_suffix(".cache.query_emb.npy")
+    cache_index = output_path.with_suffix(".cache.faiss.bin")
 
-    logger.info("Encoding queries")
-    model = SentenceTransformer(config.biencoder, device=resolved_device)
-    query_emb = model.encode(
-        query_texts,
-        batch_size=config.encode_batch_size,
-        normalize_embeddings=True,
-        convert_to_numpy=True,
-        show_progress_bar=True,
-    ).astype(np.float32)
+    if cache_passage.exists():
+        logger.info("Loading cached passage embeddings from %s", cache_passage)
+        passage_emb = np.load(cache_passage)
+    else:
+        logger.info("Encoding collection with %s", config.biencoder)
+        passage_emb = encode_collection(
+            config.biencoder,
+            passage_texts,
+            batch_size=config.encode_batch_size,
+            device=resolved_device,
+        )
+        tmp = cache_passage.with_suffix(cache_passage.suffix + ".tmp")
+        np.save(tmp, passage_emb)
+        tmp.replace(cache_passage)
+        logger.info(
+            "Cached passage embeddings to %s (%.1f MB)",
+            cache_passage,
+            cache_passage.stat().st_size / 1024 / 1024,
+        )
+
+    import faiss as _faiss
+
+    if cache_index.exists():
+        logger.info("Loading cached FAISS index from %s", cache_index)
+        index = _faiss.read_index(str(cache_index))
+    else:
+        index = build_index(passage_emb, index_type=index_type)
+        tmp = cache_index.with_suffix(cache_index.suffix + ".tmp")
+        _faiss.write_index(index, str(tmp))
+        tmp.replace(cache_index)
+        logger.info("Cached FAISS index to %s", cache_index)
+
+    if cache_query.exists():
+        logger.info("Loading cached query embeddings from %s", cache_query)
+        query_emb = np.load(cache_query)
+    else:
+        logger.info("Encoding queries")
+        model = SentenceTransformer(config.biencoder, device=resolved_device)
+        query_emb = model.encode(
+            query_texts,
+            batch_size=config.encode_batch_size,
+            normalize_embeddings=True,
+            convert_to_numpy=True,
+            show_progress_bar=True,
+        ).astype(np.float32)
+        tmp = cache_query.with_suffix(cache_query.suffix + ".tmp")
+        np.save(tmp, query_emb)
+        tmp.replace(cache_query)
+        logger.info("Cached query embeddings to %s", cache_query)
 
     logger.info("Searching top-%d for %d queries", config.top_k, len(query_texts))
     _, neighbor_rows = index.search(query_emb, config.top_k)
@@ -285,13 +323,41 @@ def mine(
     # queries whose only positives sit outside the slice.
     collection_pids_set: set[int] = {int(p) for p in pid_by_row.tolist()}
 
+    # Resume support: load any partial parquet from a prior interrupted run.
     rows_out: list[dict[str, object]] = []
+    done_qids: set[int] = set()
+    if output_path.exists():
+        prior = pq.read_table(output_path)  # type: ignore[no-untyped-call]
+        for batch in prior.to_batches():
+            qids_b = batch["query_id"].to_pylist()
+            pos_b = batch["positive_id"].to_pylist()
+            neg_b = batch["negative_ids"].to_pylist()
+            for q, p, n in zip(qids_b, pos_b, neg_b, strict=True):
+                rows_out.append(
+                    {"query_id": int(q), "positive_id": int(p), "negative_ids": list(n)}
+                )
+                done_qids.add(int(q))
+        logger.info(
+            "Resumed: %d rows / %d unique qids already on disk", len(rows_out), len(done_qids)
+        )
+
     skipped_no_qrel = 0
     skipped_insufficient_pool = 0
     skipped_positive_not_in_collection = 0
 
+    def _flush_rows(rows: list[dict[str, object]]) -> None:
+        """Atomic write of the full current rows_out to output_path."""
+        if not rows:
+            return
+        tmp = output_path.with_suffix(output_path.suffix + ".tmp")
+        pq.write_table(pa.Table.from_pylist(rows), tmp)  # type: ignore[no-untyped-call]
+        tmp.replace(output_path)
+
     for q_idx, qid in enumerate(qid_by_row.tolist()):
-        positives = qrels.get(int(qid))
+        qid_int = int(qid)
+        if qid_int in done_qids:
+            continue
+        positives = qrels.get(qid_int)
         if not positives:
             skipped_no_qrel += 1
             continue
@@ -322,7 +388,7 @@ def mine(
         for pos_pid in present_positives:
             rows_out.append(
                 {
-                    "query_id": int(qid),
+                    "query_id": qid_int,
                     "positive_id": int(pos_pid),
                     "negative_ids": negatives,
                 }
@@ -338,6 +404,11 @@ def mine(
                 skipped_insufficient_pool,
                 skipped_positive_not_in_collection,
             )
+        # Periodic flush of rows_out to disk so a crash mid-sampling loses
+        # at most the last ~50k queries' worth of work.
+        if (q_idx + 1) % 50_000 == 0:
+            _flush_rows(rows_out)
+            logger.info("Checkpointed rows_out to %s (%d rows)", output_path, len(rows_out))
 
     if not rows_out:
         raise RuntimeError(
@@ -350,8 +421,7 @@ def mine(
         )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    table = pa.Table.from_pylist(rows_out)
-    pq.write_table(table, output_path)  # type: ignore[no-untyped-call]
+    _flush_rows(rows_out)
     logger.info(
         "Wrote %d triples to %s (skipped_no_qrel=%d, skipped_pool=%d)",
         len(rows_out),
