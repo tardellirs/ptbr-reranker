@@ -274,19 +274,50 @@ def encode_collection_streaming(
 
 
 def build_index(embeddings: np.ndarray, *, index_type: str = "hnsw") -> faiss.Index:
-    """Build a FAISS index over normalized embeddings (inner product = cosine)."""
+    """Build a FAISS index over normalized embeddings (inner product = cosine).
+
+    Options:
+      - ``hnsw``: CPU HNSW M=64. Best recall but slow build (~3-5 h on 8 vCPU
+        for 8.8 M × 768).
+      - ``flat``: CPU exact brute force. No build cost; search is O(N).
+      - ``ivf_gpu``: GPU IVFFlat with nlist ≈ 4·√N. Build in seconds, search
+        on GPU. Recall slightly below HNSW but more than sufficient for
+        hard-negative mining where we sample from ranks 10-100 anyway.
+        Requires the ``faiss-gpu`` (or ``faiss-gpu-cu12``) package.
+    """
     import faiss
 
-    dim = embeddings.shape[1]
+    n, dim = embeddings.shape
     if index_type == "hnsw":
         index = faiss.IndexHNSWFlat(dim, 64, faiss.METRIC_INNER_PRODUCT)
         index.hnsw.efConstruction = 200
         index.hnsw.efSearch = 128
+        index.add(embeddings)
     elif index_type == "flat":
         index = faiss.IndexFlatIP(dim)
+        index.add(embeddings)
+    elif index_type == "ivf_gpu":
+        nlist = max(int(4 * (n**0.5)), 256)
+        quantizer = faiss.IndexFlatIP(dim)
+        cpu_index = faiss.IndexIVFFlat(quantizer, dim, nlist, faiss.METRIC_INNER_PRODUCT)
+        res = faiss.StandardGpuResources()
+        gpu_index = faiss.index_cpu_to_gpu(res, 0, cpu_index)
+        rng = np.random.default_rng(42)
+        train_size = min(1_000_000, n)
+        sample_rows = rng.choice(n, size=train_size, replace=False)
+        sample = np.ascontiguousarray(embeddings[sample_rows])
+        logger.info("Training IVF (nlist=%d) on %d samples ...", nlist, train_size)
+        gpu_index.train(sample)
+        del sample
+        chunk = 500_000
+        for start in range(0, n, chunk):
+            end = min(start + chunk, n)
+            gpu_index.add(np.ascontiguousarray(embeddings[start:end]))
+            logger.info("IVF-GPU added %d / %d vectors", end, n)
+        gpu_index.nprobe = max(32, nlist // 32)
+        index = gpu_index
     else:
         raise ValueError(f"Unknown index_type: {index_type}")
-    index.add(embeddings)
     logger.info("Built %s index with %d vectors (dim=%d)", index_type, index.ntotal, dim)
     return index
 
@@ -370,10 +401,17 @@ def mine(
     if cache_index.exists():
         logger.info("Loading cached FAISS index from %s", cache_index)
         index = _faiss.read_index(str(cache_index))
+        if index_type == "ivf_gpu":
+            res = _faiss.StandardGpuResources()
+            index = _faiss.index_cpu_to_gpu(res, 0, index)
+            index.nprobe = max(32, index.nlist // 32)
+            logger.info("Moved cached IVF index back to GPU")
     else:
         index = build_index(passage_emb, index_type=index_type)
+        # GPU indexes can't be serialized directly — pull back to CPU first.
+        index_for_disk = _faiss.index_gpu_to_cpu(index) if index_type == "ivf_gpu" else index
         tmp = cache_index.with_suffix(cache_index.suffix + ".tmp")
-        _faiss.write_index(index, str(tmp))
+        _faiss.write_index(index_for_disk, str(tmp))
         tmp.replace(cache_index)
         logger.info("Cached FAISS index to %s", cache_index)
 
@@ -548,7 +586,13 @@ def main() -> None:
     parser.add_argument("--rank-min", type=int, default=DEFAULT_RANK_MIN)
     parser.add_argument("--rank-max", type=int, default=DEFAULT_RANK_MAX)
     parser.add_argument("--encode-batch-size", type=int, default=DEFAULT_ENCODE_BATCH_SIZE)
-    parser.add_argument("--index-type", default="hnsw", choices=["hnsw", "flat"])
+    parser.add_argument(
+        "--index-type",
+        default="ivf_gpu",
+        choices=["hnsw", "flat", "ivf_gpu"],
+        help="GPU IVFFlat (default) is ~100x faster to build than CPU HNSW "
+        "and recall is sufficient for rank-10-100 hard-neg sampling.",
+    )
     parser.add_argument(
         "--device",
         default="auto",
