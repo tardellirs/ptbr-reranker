@@ -455,8 +455,13 @@ def mine(
             convert_to_numpy=True,
             show_progress_bar=True,
         ).astype(np.float32)
+        # ``np.save(path, ...)`` silently appends ``.npy`` when the path
+        # doesn't already end in it. Writing via a file handle bypasses
+        # that, so the on-disk name matches what we ask for and the
+        # atomic rename below actually finds the file.
         tmp = cache_query.with_suffix(cache_query.suffix + ".tmp")
-        np.save(tmp, query_emb)
+        with open(tmp, "wb") as f:
+            np.save(f, query_emb)
         tmp.replace(cache_query)
         logger.info("Cached query embeddings to %s", cache_query)
 
