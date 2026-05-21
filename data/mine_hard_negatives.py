@@ -281,9 +281,15 @@ def build_index(embeddings: np.ndarray, *, index_type: str = "hnsw") -> faiss.In
         for 8.8 M x 768).
       - ``flat``: CPU exact brute force. No build cost; search is O(N).
       - ``ivf_gpu``: GPU IVFFlat with nlist ≈ 4·√N. Build in seconds, search
-        on GPU. Recall slightly below HNSW but more than sufficient for
-        hard-negative mining where we sample from ranks 10-100 anyway.
-        Requires the ``faiss-gpu`` (or ``faiss-gpu-cu12``) package.
+        on GPU. Vectors stored uncompressed (768·4 = 3 KB each) — for
+        8.8 M vectors that needs ~27 GB VRAM, won't fit on a 3090 (24 GB).
+        Use only on >=32 GB cards.
+      - ``ivfpq_gpu``: GPU IVFPQ with M=64 sub-quantizers and 8-bit codes.
+        Product quantization compresses each vector to 64 bytes (50x), so
+        all 8.8 M vectors fit in <1 GB of VRAM. Recall is slightly worse
+        than IVFFlat but more than enough for rank-10-100 hard-neg sampling.
+        Default — fits on any GPU with ≥4 GB VRAM.
+      Both ``*_gpu`` variants require the ``faiss-gpu`` package.
     """
     import faiss
 
@@ -296,24 +302,37 @@ def build_index(embeddings: np.ndarray, *, index_type: str = "hnsw") -> faiss.In
     elif index_type == "flat":
         index = faiss.IndexFlatIP(dim)
         index.add(embeddings)
-    elif index_type == "ivf_gpu":
+    elif index_type in ("ivf_gpu", "ivfpq_gpu"):
         nlist = max(int(4 * (n**0.5)), 256)
         quantizer = faiss.IndexFlatIP(dim)
-        cpu_index = faiss.IndexIVFFlat(quantizer, dim, nlist, faiss.METRIC_INNER_PRODUCT)
+        if index_type == "ivf_gpu":
+            cpu_index = faiss.IndexIVFFlat(quantizer, dim, nlist, faiss.METRIC_INNER_PRODUCT)
+        else:  # ivfpq_gpu
+            pq_m = 64  # sub-quantizers; dim must be divisible by pq_m
+            assert dim % pq_m == 0, f"dim {dim} not divisible by pq_m {pq_m}"
+            pq_nbits = 8
+            cpu_index = faiss.IndexIVFPQ(
+                quantizer, dim, nlist, pq_m, pq_nbits, faiss.METRIC_INNER_PRODUCT
+            )
         res = faiss.StandardGpuResources()
         gpu_index = faiss.index_cpu_to_gpu(res, 0, cpu_index)
         rng = np.random.default_rng(42)
         train_size = min(1_000_000, n)
         sample_rows = rng.choice(n, size=train_size, replace=False)
         sample = np.ascontiguousarray(embeddings[sample_rows])
-        logger.info("Training IVF (nlist=%d) on %d samples ...", nlist, train_size)
+        logger.info(
+            "Training %s (nlist=%d) on %d samples ...",
+            index_type,
+            nlist,
+            train_size,
+        )
         gpu_index.train(sample)
         del sample
         chunk = 500_000
         for start in range(0, n, chunk):
             end = min(start + chunk, n)
             gpu_index.add(np.ascontiguousarray(embeddings[start:end]))
-            logger.info("IVF-GPU added %d / %d vectors", end, n)
+            logger.info("%s added %d / %d vectors", index_type, end, n)
         gpu_index.nprobe = max(32, nlist // 32)
         index = gpu_index
     else:
@@ -398,10 +417,11 @@ def mine(
 
     import faiss as _faiss
 
+    is_gpu_index = index_type in ("ivf_gpu", "ivfpq_gpu")
     if cache_index.exists():
         logger.info("Loading cached FAISS index from %s", cache_index)
         index = _faiss.read_index(str(cache_index))
-        if index_type == "ivf_gpu":
+        if is_gpu_index:
             res = _faiss.StandardGpuResources()
             index = _faiss.index_cpu_to_gpu(res, 0, index)
             index.nprobe = max(32, index.nlist // 32)
@@ -409,7 +429,7 @@ def mine(
     else:
         index = build_index(passage_emb, index_type=index_type)
         # GPU indexes can't be serialized directly — pull back to CPU first.
-        index_for_disk = _faiss.index_gpu_to_cpu(index) if index_type == "ivf_gpu" else index
+        index_for_disk = _faiss.index_gpu_to_cpu(index) if is_gpu_index else index
         tmp = cache_index.with_suffix(cache_index.suffix + ".tmp")
         _faiss.write_index(index_for_disk, str(tmp))
         tmp.replace(cache_index)
@@ -588,10 +608,11 @@ def main() -> None:
     parser.add_argument("--encode-batch-size", type=int, default=DEFAULT_ENCODE_BATCH_SIZE)
     parser.add_argument(
         "--index-type",
-        default="ivf_gpu",
-        choices=["hnsw", "flat", "ivf_gpu"],
-        help="GPU IVFFlat (default) is ~100x faster to build than CPU HNSW "
-        "and recall is sufficient for rank-10-100 hard-neg sampling.",
+        default="ivfpq_gpu",
+        choices=["hnsw", "flat", "ivf_gpu", "ivfpq_gpu"],
+        help="GPU IVFPQ (default) compresses vectors 50x so 8.8M passages "
+        "fit in <1 GB VRAM. ivf_gpu requires >=32 GB VRAM. CPU HNSW is "
+        "kept as a fallback when no GPU is available.",
     )
     parser.add_argument(
         "--device",
