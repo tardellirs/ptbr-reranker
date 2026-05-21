@@ -315,7 +315,14 @@ def build_index(embeddings: np.ndarray, *, index_type: str = "hnsw") -> faiss.In
                 quantizer, dim, nlist, pq_m, pq_nbits, faiss.METRIC_INNER_PRODUCT
             )
         res = faiss.StandardGpuResources()
-        gpu_index = faiss.index_cpu_to_gpu(res, 0, cpu_index)
+        cloner = faiss.GpuClonerOptions()
+        # 3090 (Ampere) ships only ~49 KB shared mem/block; the default
+        # float32 PQ lookup table for M=64 nbits=8 needs 64 KB and crashes
+        # ``verifyPQSettings_``. float16 lookup halves that and fits.
+        cloner.useFloat16 = True
+        if index_type == "ivfpq_gpu":
+            cloner.useFloat16LookupTables = True
+        gpu_index = faiss.index_cpu_to_gpu(res, 0, cpu_index, cloner)
         rng = np.random.default_rng(42)
         train_size = min(1_000_000, n)
         sample_rows = rng.choice(n, size=train_size, replace=False)
