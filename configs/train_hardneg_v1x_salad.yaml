@@ -1,0 +1,44 @@
+# v1.x training config — hard negatives mined via Serafim-IR, 2M queries.
+#
+# Stage 1a of the post-v1.0 plan: same recipe as v0.1 (BinaryCE, 1 epoch,
+# Albertina-100m) but with hard negatives instead of BM25 negatives. Run on
+# Salad RTX 5090 (~$0.38/h priority=medium → ~$1.50 for the full training).
+# Stage 1b later swaps the loss to softmax cross-entropy.
+
+base_model: PORTULAN/albertina-100m-portuguese-ptbr-encoder
+
+# Data — produced by:
+#   data/mine_hard_negatives.py --positives-from-triples triples.train.ids.small.tsv \
+#     --queries queries_train_portuguese.parquet \
+#     --collection collection_portuguese.parquet \
+#     --output data/processed/hard_negatives.parquet
+# then:
+#   data/build_triples.py --mined-triples data/processed/hard_negatives.parquet \
+#     --queries queries_train_portuguese.parquet \
+#     --collection collection_portuguese.parquet \
+#     --output data/processed/triples_hardneg.parquet
+train_triples: data/processed/triples_hardneg.parquet
+
+num_epochs: 1
+batch_size: 32
+grad_accum_steps: 2          # effective batch = 64
+learning_rate: 2.0e-5
+warmup_ratio: 0.05
+max_length: 256
+
+optimizer: adamw
+weight_decay: 0.01
+gradient_checkpointing: false
+mixed_precision: bf16
+
+seed: 42
+
+output_dir: runs/hardneg_v1x
+eval_every_steps: 100000
+save_every_steps: 5000
+keep_top_k_checkpoints: 2
+log_every_steps: 200
+
+wandb_project: null
+codecarbon_enabled: true
+device: auto
