@@ -278,7 +278,7 @@ def build_index(embeddings: np.ndarray, *, index_type: str = "hnsw") -> faiss.In
 
     Options:
       - ``hnsw``: CPU HNSW M=64. Best recall but slow build (~3-5 h on 8 vCPU
-        for 8.8 M × 768).
+        for 8.8 M x 768).
       - ``flat``: CPU exact brute force. No build cost; search is O(N).
       - ``ivf_gpu``: GPU IVFFlat with nlist ≈ 4·√N. Build in seconds, search
         on GPU. Recall slightly below HNSW but more than sufficient for
