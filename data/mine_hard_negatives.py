@@ -430,7 +430,11 @@ def mine(
         index = _faiss.read_index(str(cache_index))
         if is_gpu_index:
             res = _faiss.StandardGpuResources()
-            index = _faiss.index_cpu_to_gpu(res, 0, index)
+            cloner = _faiss.GpuClonerOptions()
+            cloner.useFloat16 = True
+            if index_type == "ivfpq_gpu":
+                cloner.useFloat16LookupTables = True
+            index = _faiss.index_cpu_to_gpu(res, 0, index, cloner)
             index.nprobe = max(32, index.nlist // 32)
             logger.info("Moved cached IVF index back to GPU")
     else:
