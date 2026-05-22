@@ -6,6 +6,44 @@ Princípio: se não está aqui, não aconteceu. O paper sai daqui.
 
 ---
 
+## 2026-05-22 — v1.x (hard negatives) — REGREDIU vs v0.1
+
+**Hipótese:** trocar BM25 random negatives por hard negatives minerados via Serafim-IR (rank 10-100, 7 negs/query) deveria render **+3-5 pp MRR@10** sobre v0.1 (canonical recipe ANCE/BGE).
+
+**O que foi feito:**
+- Mineração no Salad RTX 3090: tentei HNSW CPU (3.5 h e ainda assim sobrecarregou RAM), depois IVFFlat GPU (overflow VRAM 24GB), finalmente **IVFPQ-GPU M=64 nbits=8 com float16 lookup** — único que coube em <1 GB VRAM e completou em ~2 min. Output: `tardellirs/ptbr-reranker-hard-negatives` (415.9k triples × 7 negs = 2.91M pairs).
+- Treino Albertina-100m no Salad 3090, depois migrado pro GPUhub 4090 48GB (datacenter, estável). Resume from HF cache step-45000 → train completed em 4h06min sólidos. train_loss final 0.140 (vs v0.1 0.127, vs v1.0 0.016 saturated).
+- Eval top-1000 mMARCO-PT dev na 4090.
+
+**Resultado:**
+
+| | v0.1 (2M BM25) | v1.0 (10M BM25) | **v1.x (2.91M HN)** | Δ vs v0.1 |
+|---|---|---|---|---|
+| MRR@10 | **0.2945** | 0.2876 | **0.2159** | **-7.9 pp** |
+| nDCG@10 | **0.3437** | 0.3385 | **0.2504** | **-9.3 pp** |
+| MAP | 0.2980 | 0.2915 | 0.2215 | -7.7 |
+| Recall@1000 | 0.7442 | 0.7442 | 0.7442 | 0 |
+| train_loss final | 0.127 | 0.016 | 0.140 | — |
+
+Hard negs PIORARAM o modelo em todos os critérios de qualidade (top-10 e top-100). Mantém Recall@1000 idêntico porque o ceiling é o BM25 retrieval.
+
+**Hipóteses do regresso (em ordem de plausibilidade):**
+
+1. **IVFPQ baixo recall em rank 10-100.** PQ com M=64 nbits=8 comprime 768→64 bytes (50×) — o erro de quantização desloca rankings na faixa que amostramos. Os "rank 10-100" do IVFPQ provavelmente não correspondem aos top-100 do verdadeiro vizinhança de cosseno. Resultado: muitos "hard negs" eram apenas passagens aleatórias, não realmente similares. O modelo aprendeu a separar ruído, não similaridade fina.
+2. **Resume de checkpoint cross-pod** (Salad 3090 step 45k → GPUhub 4090 step 45k via HF). Optimizer/scheduler/RNG foram preservados mas a curva de LR já estava bem além do warmup, com 50% do treino ainda pela frente. Pode ter degradado a convergência.
+3. **Sinal de positivos limitado.** Usamos `triples.train.ids.small.tsv` como source de positivos, que só cobre 398.7k de 808.7k queries (49%). As outras 410k queries não geraram triples mesmo tendo embeddings. Volume efetivo bem menor que o esperado.
+
+**Decisão:** v0.1 permanece como modelo de referência. **v1.x é um RESULTADO NEGATIVO de paper-quality** — mostra que escolha errada de retrieval no mining (PQ vs Flat) destrói os benefícios prometidos por hard negatives. Vou documentar isso na seção "Ablations" do paper.
+
+**TODO:**
+- [x] Push v1.x final + eval results para HF Hub.
+- [x] Artefatos em `outputs/v1.x_top1000/` + `docs/paper_assets/v1.x/`.
+- [x] Update experiments_log com a linha v1.x (status=discard, motivo: PQ retrieval).
+- [ ] **Eventual retry futuro com IVFFlat GPU em pod com VRAM ≥ 32 GB** (5090, 6000 Ada, etc.). PQ não serve para mining em scale.
+- [ ] **Próxima alavanca confiável**: softmax CE loss (Stage 1b) — mudança de loss, sem mexer em mining. Mesmo dataset v0.1, esperado +1-2 pp.
+
+---
+
 ## 2026-05-20 — v0.1 vs v1.0 top-1000 head-to-head em mMARCO-PT dev
 
 **Hipótese a testar:** v1.0 (10M triples) deveria superar v0.1 (2M triples) em ≥ 3pp MRR@10 — justificando o gasto extra de GPU (5× mais dados).
