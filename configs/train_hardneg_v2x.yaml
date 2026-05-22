@@ -1,0 +1,36 @@
+# v2.x training config — hard negatives mined via Serafim-IR + IVFFlat GPU.
+#
+# Same recipe as v1.x but with FAITHFUL IVFFlat retrieval (uncompressed
+# 768-dim vectors on GPU) instead of IVFPQ (50× compressed, lossy on rank
+# 10-100 sampling). v1.x regressed -7.9 pp MRR@10 vs v0.1 — we hypothesize
+# the PQ quantization shifted the rank-10-100 window away from real
+# neighbors, training the model on noise. This run tests that hypothesis
+# by changing only the index type.
+
+base_model: PORTULAN/albertina-100m-portuguese-ptbr-encoder
+
+train_triples: data/processed/triples_hardneg_v2.parquet
+
+num_epochs: 1
+batch_size: 32
+grad_accum_steps: 2
+learning_rate: 2.0e-5
+warmup_ratio: 0.05
+max_length: 256
+
+optimizer: adamw
+weight_decay: 0.01
+gradient_checkpointing: false
+mixed_precision: bf16
+
+seed: 42
+
+output_dir: runs/hardneg_v2x
+eval_every_steps: 100000
+save_every_steps: 5000
+keep_top_k_checkpoints: 2
+log_every_steps: 200
+
+wandb_project: null
+codecarbon_enabled: true
+device: auto
