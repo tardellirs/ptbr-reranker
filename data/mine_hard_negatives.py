@@ -439,12 +439,16 @@ def mine(
             logger.info("Moved cached IVF index back to GPU")
     else:
         index = build_index(passage_emb, index_type=index_type)
-        # GPU indexes can't be serialized directly — pull back to CPU first.
-        index_for_disk = _faiss.index_gpu_to_cpu(index) if is_gpu_index else index
-        tmp = cache_index.with_suffix(cache_index.suffix + ".tmp")
-        _faiss.write_index(index_for_disk, str(tmp))
-        tmp.replace(cache_index)
-        logger.info("Cached FAISS index to %s", cache_index)
+        # GPU index rebuild is ~30 s — skip the disk cache to avoid
+        # competing for disk space with the 25 GB passage_emb memmap.
+        # CPU indexes (hnsw/flat) still get cached since their build is slow.
+        if is_gpu_index:
+            logger.info("Skipping FAISS index cache write (GPU rebuild is fast)")
+        else:
+            tmp = cache_index.with_suffix(cache_index.suffix + ".tmp")
+            _faiss.write_index(index, str(tmp))
+            tmp.replace(cache_index)
+            logger.info("Cached FAISS index to %s", cache_index)
 
     if cache_query.exists():
         logger.info("Loading cached query embeddings from %s", cache_query)
