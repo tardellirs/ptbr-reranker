@@ -31,9 +31,15 @@ model-index:
           split: dev
         metrics:
           - type: mrr_at_10
-            value: TBD
+            value: 0.2945
           - type: ndcg_at_10
-            value: TBD
+            value: 0.3437
+          - type: map
+            value: 0.2980
+          - type: recall_at_100
+            value: 0.7055
+          - type: recall_at_1000
+            value: 0.7442
       - task:
           type: text-ranking
           name: Passage Reranking
