@@ -474,7 +474,20 @@ def mine(
         logger.info("Cached query embeddings to %s", cache_query)
 
     logger.info("Searching top-%d for %d queries", config.top_k, len(query_texts))
-    _, neighbor_rows = index.search(query_emb, config.top_k)
+    # GPU IVFFlat search on 8.8 M × 768 with 800 k queries tries to
+    # allocate >40 GB of temporary memory in one shot, which overflows
+    # even a 48 GB card. Search in slices of 50 k queries instead — peak
+    # temp memory drops to single-digit GB and total wall time is the
+    # same (sequential anyway).
+    search_chunk = 50_000
+    neighbor_rows_chunks = []
+    for s in range(0, query_emb.shape[0], search_chunk):
+        e = min(s + search_chunk, query_emb.shape[0])
+        _, nb = index.search(query_emb[s:e], config.top_k)
+        neighbor_rows_chunks.append(nb)
+        logger.info("Searched %d / %d queries", e, query_emb.shape[0])
+    neighbor_rows = np.concatenate(neighbor_rows_chunks, axis=0)
+    del neighbor_rows_chunks
 
     # Positives must be present in our collection — otherwise downstream
     # build_triples cannot resolve the positive_id to text. In a full-mode
