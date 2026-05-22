@@ -478,7 +478,7 @@ def mine(
         logger.info("Cached query embeddings to %s", cache_query)
 
     logger.info("Searching top-%d for %d queries", config.top_k, len(query_texts))
-    # GPU IVFFlat search on 8.8 M × 768 with 800 k queries tries to
+    # GPU IVFFlat search on 8.8 M x 768 with 800 k queries tries to
     # allocate >40 GB of temporary memory in one shot, which overflows
     # even a 48 GB card. Search in slices of 50 k queries instead — peak
     # temp memory drops to single-digit GB and total wall time is the
