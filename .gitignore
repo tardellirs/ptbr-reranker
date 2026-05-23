@@ -95,3 +95,6 @@ paper/main.pdf
 .env.local
 *.key
 secrets/
+
+# Claude Code local context (not tracked)
+CLAUDE.md

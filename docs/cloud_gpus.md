@@ -7,7 +7,10 @@ All workflows assume `.env` at repo root with provider keys + `HF_TOKEN`.
 
 | Provider | GPU | $/h | VRAM | Stability | Best for |
 |---|---|---|---|---|---|
-| **GPUhub** 5090 | RTX 5090 | $0.36 | 32 GB | datacenter | **default** — cheapest fast Ada |
+| **Lightning AI** T4 | T4 | **$0.19** | 16 GB | datacenter | smoke tests, eval CPU-bound |
+| **Lightning AI** L4 | L4 | **$0.48** | 24 GB | datacenter | **default** for our workloads — $15 free/mo |
+| **Lightning AI** A100 | A100 40GB | $1.55 | 40 GB | datacenter | big training when needed |
+| **GPUhub** 5090 | RTX 5090 | $0.36 | 32 GB | datacenter | fast Ada when no Lightning credits left |
 | **GPUhub** 4080 Super | RTX 4080S | $0.23 | 32 GB | datacenter | budget train/eval |
 | **GPUhub** 4090 | RTX 4090 (48GB!) | $0.44 | 48 GB | datacenter | mining (needs >32GB VRAM) |
 | GPUhub A800 / PRO 6000 | A800 / RTX PRO 6000 | $0.91-0.93 | 80-96 GB | datacenter | Albertina-900M |
@@ -16,7 +19,101 @@ All workflows assume `.env` at repo root with provider keys + `HF_TOKEN`.
 | Runpod Community 4090 | RTX 4090 | $0.34 | 24 GB | can be evicted | short jobs only |
 | Salad medium 3090 | RTX 3090 | $0.197 | 24 GB | **migrates often** | one-off mining if cheap matters |
 
-**Rule of thumb**: GPUhub by default, Runpod Secure as fallback. Salad community only for jobs that fit in <2h or have full HF-backup recovery.
+**Rule of thumb**: Lightning AI L4 by default (free $15/mo covers most experiments). GPUhub 5090 as paid fallback. Runpod Secure for API-driven flows.
+
+## Lightning AI Studios (lightning.ai)
+
+**Why prefer**: $15 free credits/month renew, persistent storage, simple CLI, US-region GCP/AWS/Lambda infra. Per-second billing.
+
+- Console: `https://lightning.ai/<username>/<teamspace>`
+- Docs: `https://lightning.ai/docs/overview/cli`
+- API: SDK + CLI. Auth via `LIGHTNING_USER_ID` + `LIGHTNING_API_KEY` env vars (no `lightning login` needed)
+- Storage: persistent across sessions (data in `/teamspace/studios/this_studio` survives stop)
+
+**First-time setup (already done for this repo):**
+
+```bash
+# 1. Install CLI in project venv
+cd /Users/tardelli/Workplace/huggingface-embedding
+source .venv/bin/activate
+uv pip install lightning-sdk
+# binary lives at .venv/bin/lightning
+
+# 2. Save credentials to .env (already there for this repo)
+# LIGHTNING_USER_ID=<uuid>
+# LIGHTNING_API_KEY=<uuid>
+# LIGHTNING_USERNAME=tardellirs
+# LIGHTNING_TEAMSPACE=playground
+
+# 3. SSH key (already in ~/.ssh/id_lightningAI ed25519)
+chmod 600 ~/.ssh/id_lightningAI
+ssh-add ~/.ssh/id_lightningAI
+
+# 4. Sanity check auth (lists 32 machine families)
+set -a && source .env && set +a
+lightning machine list | head -5
+```
+
+**Day-to-day commands** (env vars loaded from `.env`):
+
+```bash
+cd /Users/tardelli/Workplace/huggingface-embedding
+source .venv/bin/activate
+set -a && source .env && set +a
+
+# 1. create + start a studio on L4
+lightning studio start --name ptbr-reranker --teamspace tardellirs/playground \
+  --machine L4 --create
+
+# 2. configure SSH (writes to ~/.ssh/config)
+lightning ssh configure --name ptbr-reranker --teamspace tardellirs/playground
+
+# 3. connect via SSH (works after configure)
+ssh s_<studio-id>@ssh.lightning.ai
+
+# 4. switch machine type without losing data
+lightning studio switch --name ptbr-reranker --machine A100
+
+# 5. stop (no billing during stop, data persists)
+lightning studio stop --name ptbr-reranker
+
+# alternative: async job, no idle timeout, killed when command finishes
+lightning job run --name eval-v0.1-stage1b --machine L4 \
+  --studio ptbr-reranker --teamspace tardellirs/playground \
+  --command "cd /teamspace/studios/this_studio/ptbr-reranker && python -m src.train --config configs/train_stage1b.yaml"
+
+# query balance + machine list via SDK
+python -c "
+from lightning_sdk.api.user_api import UserApi
+from lightning_sdk import Teamspace
+t = Teamspace(name='playground', user='tardellirs')
+print(UserApi()._client.billing_service_get_project_balance(project_id=t.id))
+"
+```
+
+**Pricing (queried via SDK 2026-05-22, $/h on-demand, cheapest enabled per family):**
+
+| Family | $/h | Provider | $15 credits = | Notes |
+|---|---:|---|---:|---|
+| CPU 8c | $0.082 | Vultr | 183h | denoising / dataprep |
+| T4 16GB | $0.190 | AWS g4dn | 78h | smoke tests, light eval |
+| A16 16GB | $0.471 | Vultr | 31h | uncommon, similar to T4 |
+| L4 24GB | $0.480 | GCP g2-standard-8 | **31h** | **default** training |
+| A100 40GB | $1.550 | Lambda Labs | 9h45min | big batch training |
+| L40S 48GB | $1.671 | Vultr | 8h57min | high VRAM Ada |
+| A40 48GB | $1.712 | Vultr | 8h45min | high VRAM Ampere |
+| H100 80GB | $1.990 | Voltage Park | 7h30min | premium dense |
+| RTXP_6000 | $4.640 | AWS g7e | 3h13min | expensive |
+| H200 | $3.620 | Nebius | 4h08min | premium |
+| B200_X_8 | $39.920 | Lambda | 22min | overkill for us |
+
+**Limits / gotchas:**
+- Default `--machine` is CPU-4 — explicitly pass `--machine L4` etc.
+- Studio idle auto-shutdown after ~10min unused (Free tier may force restart after 4h continuous — use `lightning job run` to bypass).
+- `lightning ssh configure` writes to `~/.ssh/config` — use `--overwrite` if regenerating.
+- Teamspace must be `<owner>/<name>` format (e.g. `tardellirs/playground`).
+- No `--ssh-key` flag — uses Lightning-managed key in `~/.ssh/id_lightningAI` by default after first `ssh configure`.
+- Spot/interruptible: most clusters show $0.00 spot in the catalog — means not currently offered or requires special quota.
 
 ## GPUhub (gpuhub.com — international branch of AutoDL)
 

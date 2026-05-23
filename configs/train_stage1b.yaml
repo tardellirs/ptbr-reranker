@@ -1,0 +1,48 @@
+# Stage 1b — change the LOSS, keep everything else from v0.1.
+#
+# Hypothesis: v0.1 (BinaryCE on BM25-random triples) reached 0.2945 MRR@10
+# but is the wrong loss family for harder negatives — every subsequent
+# attempt with the same loss but different negs regressed (-0.7, -7.9, -10.1 pp).
+# This run swaps BinaryCrossEntropyLoss for MultipleNegativesRankingLoss
+# (InfoNCE / listwise softmax CE with in-batch negatives + the explicit BM25 negative).
+# Same 2M triples, same hparams, same seed → isolates the loss as the variable.
+#
+# If MRR@10 > 0.2945, the loss hypothesis is confirmed and Stage 1c
+# (re-run v2.x hard-neg triples with this loss) becomes the obvious next step.
+
+base_model: PORTULAN/albertina-100m-portuguese-ptbr-encoder
+
+train_triples: data/processed/triples_200k_bm25.parquet
+# NOTE: 200k subset (10% of v0.1) due to Lightning AI Free budget; MNRL is
+# ~4× slower per step than BinaryCE due to listwise pair scoring. 200k
+# samples × 32 in-batch candidates ≈ 6.4M effective gradient comparisons,
+# comparable to v0.1's 2M × 2 candidates = 4M. Test of loss hypothesis remains valid.
+
+# ---- the change ----
+loss_type: mnrl              # MultipleNegativesRankingLoss (InfoNCE)
+mnrl_num_negatives: 4        # in-batch negatives sampled per anchor (default in lib)
+mnrl_scale: 10.0             # logit scale before softmax
+
+num_epochs: 1
+batch_size: 8                # MNRL is quadratic in batch — keep small on 24GB L4
+grad_accum_steps: 8          # effective batch 64 (same as v0.1)
+learning_rate: 2.0e-5
+warmup_ratio: 0.05
+max_length: 256
+
+optimizer: adamw
+weight_decay: 0.01
+gradient_checkpointing: true # save VRAM at ~25% compute overhead
+mixed_precision: bf16
+
+seed: 42
+
+output_dir: runs/stage1b
+eval_every_steps: 100000
+save_every_steps: 500        # frequent HF backup — Lightning Free has 4h session cap; 200k/64=3125 steps
+keep_top_k_checkpoints: 2
+log_every_steps: 100
+
+wandb_project: null
+codecarbon_enabled: true
+device: auto

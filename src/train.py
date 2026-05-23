@@ -63,6 +63,9 @@ class TrainConfig:
     wandb_tags: list[str] = field(default_factory=list)
     codecarbon_enabled: bool = True
     device: str = "auto"
+    loss_type: str = "bce"  # "bce" = BinaryCrossEntropyLoss, "mnrl" = MultipleNegativesRankingLoss
+    mnrl_num_negatives: int = 4
+    mnrl_scale: float = 10.0
 
     @classmethod
     def from_yaml(cls, path: Path) -> TrainConfig:
@@ -92,6 +95,9 @@ class TrainConfig:
             wandb_tags=list(raw.get("wandb_tags", [])),
             codecarbon_enabled=raw.get("codecarbon_enabled", True),
             device=raw.get("device", "auto"),
+            loss_type=raw.get("loss_type", "bce"),
+            mnrl_num_negatives=raw.get("mnrl_num_negatives", 4),
+            mnrl_scale=float(raw.get("mnrl_scale", 10.0)),
         )
 
 
@@ -268,6 +274,30 @@ def triples_to_pairs(triples_path: Path) -> datasets.Dataset:
     return Dataset.from_parquet(str(pairs_path), keep_in_memory=False)
 
 
+def triples_to_triplets(triples_path: Path) -> datasets.Dataset:
+    """Read ``(query, positive, negative)`` triples and return them unchanged as a Dataset.
+
+    Used by listwise losses (MultipleNegativesRankingLoss) that consume one
+    triplet per training example rather than the expanded ``(text_a, text_b, label)``
+    pair format. With this loss, in-batch negatives plus the explicit negative
+    are scored together via softmax — the comparison is relative, not pointwise.
+    """
+    from datasets import Dataset
+
+    ds = Dataset.from_parquet(str(triples_path), keep_in_memory=False)
+    rename_map: dict[str, str] = {}
+    if "query_text" in ds.column_names:
+        rename_map["query_text"] = "query"
+    if "positive_text" in ds.column_names:
+        rename_map["positive_text"] = "positive"
+    if "negative_text" in ds.column_names:
+        rename_map["negative_text"] = "negative"
+    if rename_map:
+        ds = ds.rename_columns(rename_map)
+    keep = [c for c in ("query", "positive", "negative") if c in ds.column_names]
+    return ds.select_columns(keep)
+
+
 def _maybe_start_codecarbon(output_dir: Path, enabled: bool) -> object | None:
     """Best-effort start of a codecarbon emissions tracker. Returns the tracker or None."""
     if not enabled:
@@ -353,7 +383,10 @@ def train(
     rebuilt mid-run (out of credits, eviction, host issue).
     """
     from sentence_transformers import CrossEncoder
-    from sentence_transformers.cross_encoder.losses import BinaryCrossEntropyLoss
+    from sentence_transformers.cross_encoder.losses import (
+        BinaryCrossEntropyLoss,
+        MultipleNegativesRankingLoss,
+    )
     from sentence_transformers.cross_encoder.trainer import CrossEncoderTrainer
     from sentence_transformers.cross_encoder.training_args import (
         CrossEncoderTrainingArguments,
@@ -368,12 +401,17 @@ def train(
     wandb_active = _maybe_init_wandb(config, resolved_device)
     tracker = _maybe_start_codecarbon(config.output_dir, config.codecarbon_enabled)
 
-    logger.info("Loading triples from %s", config.train_triples)
-    train_dataset = triples_to_pairs(config.train_triples)
+    logger.info("Loading triples from %s (loss_type=%s)", config.train_triples, config.loss_type)
+    if config.loss_type == "mnrl":
+        train_dataset = triples_to_triplets(config.train_triples)
+        debug_row_label = "triplets"
+    else:
+        train_dataset = triples_to_pairs(config.train_triples)
+        debug_row_label = "pairs"
     if debug:
         n = min(64, len(train_dataset))
         train_dataset = train_dataset.select(range(n))
-        logger.info("Debug mode: truncated to %d pairs", n)
+        logger.info("Debug mode: truncated to %d %s", n, debug_row_label)
 
     logger.info("Loading base model %s", config.base_model)
     model_kwargs: dict[str, Any] = {}
@@ -389,7 +427,16 @@ def train(
     if resolved_device == "cpu":
         model.model.float()
 
-    loss = BinaryCrossEntropyLoss(model)
+    if config.loss_type == "mnrl":
+        loss = MultipleNegativesRankingLoss(
+            model,
+            num_negatives=config.mnrl_num_negatives,
+            scale=config.mnrl_scale,
+        )
+    elif config.loss_type == "bce":
+        loss = BinaryCrossEntropyLoss(model)
+    else:
+        raise ValueError(f"Unknown loss_type {config.loss_type!r}; expected 'bce' or 'mnrl'.")
 
     args_kwargs: dict[str, Any] = {
         "output_dir": str(config.output_dir),

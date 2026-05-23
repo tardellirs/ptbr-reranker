@@ -1,0 +1,35 @@
+# Stage 1b CONTROL — same 200k data as Stage 1b MNRL, but BinaryCE loss.
+#
+# Isolates the loss variable: if BCE 200k > MNRL 200k → MNRL hurts.
+# If BCE 200k ≈ MNRL 200k → no signal from loss change.
+# If BCE 200k < MNRL 200k → MNRL helps; just needed more data than 200k.
+
+base_model: PORTULAN/albertina-100m-portuguese-ptbr-encoder
+
+train_triples: data/processed/triples_200k_bm25.parquet
+
+loss_type: bce
+
+num_epochs: 1
+batch_size: 32
+grad_accum_steps: 2
+learning_rate: 2.0e-5
+warmup_ratio: 0.1
+max_length: 256
+
+optimizer: adamw
+weight_decay: 0.01
+gradient_checkpointing: false
+mixed_precision: bf16
+
+seed: 42
+
+output_dir: runs/stage1b_control_bce
+eval_every_steps: 100000
+save_every_steps: 1000
+keep_top_k_checkpoints: 2
+log_every_steps: 100
+
+wandb_project: null
+codecarbon_enabled: true
+device: auto

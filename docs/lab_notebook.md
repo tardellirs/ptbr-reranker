@@ -6,6 +6,104 @@ Princípio: se não está aqui, não aconteceu. O paper sai daqui.
 
 ---
 
+## 2026-05-23 — Stage 1b + control + decisão "stop spending, build the rest"
+
+**Hipótese Stage 1b:** v0.1 (BinaryCE pointwise) e v1.x/v2.x (BinaryCE com hard-negs) sofrem da mesma loss errada para hard-negs. Trocar `BinaryCrossEntropyLoss` por `MultipleNegativesRankingLoss` (InfoNCE listwise com in-batch + 4 negs explicit) deve ajudar, mesmo com 10% dos dados (200k vs 2M de v0.1).
+
+**O que foi feito:**
+- Modificações em `src/train.py`: adicionado `loss_type: bce|mnrl`, `mnrl_num_negatives`, `mnrl_scale` no `TrainConfig`. Função nova `triples_to_triplets` que mantém triples no formato `(query, positive, negative)` sem expandir em pares (MNRL consume listwise).
+- Smoke test 4 steps Mac CPU com distiluse-multilingual: loss 1.41→1.22 monotônico — código correto.
+- Lightning AI Studio criado em GCP (cluster `gcp-lightning-public-prod`, L4 GCP $0.48/h — 3.3× mais barato que L4 AWS $1.58/h do studio anterior). Migrou Mac→HF→studio: triples 2M (~698MB) pushed pra `tardellirs/ptbr-reranker-training-data` (com race condition: upload pegou parquet truncated, refeito), subset 200k.
+- Training Stage 1b L4 GCP: 200k triples, batch 8 × grad_accum 8 = effective 64, max_len 256, bf16, gradient_checkpointing=True (necessário por OOM em batch 32 — MNRL é quadrático no batch: 8 anchors × (1 pos + 7 in-batch + 4 explicit) = 96 pares scored por batch). 6h × $0.48 = ~$2.86. train_loss avg 0.158, descida monotônica limpa.
+- Eval top-100 (apenas) em L4: MRR@10 **0.2511** / nDCG@10 0.2966. **Regressão -3 pp vs v0.1 top-100 (0.2810)**. Top-1000 seria ~25h em L4, $12 — over budget — skipped.
+- HF backup loop funcionou: checkpoints 500/1000/1500/2000/2500/3000 pushed automaticamente. 4h Lightning Free cap NÃO triggou — sessão estável 6h+ com heartbeat tmux ativo. Restart force-cap só pra studios idle.
+- Custo total: ~$3.86 (train + eval top-100 + control train).
+
+**Control BCE em 200k:** mesma config Stage 1b mas com BinaryCE → train_loss 0.286 (vs v0.1 com 2M = 0.127). **Eval skipped**: o sinal era ambíguo (sem comparação top-1000 não conclusivo sobre loss vs data confound), e investir mais $1.20 só pra ter um ablation row não compensava o restante do budget. Modelo pushed pra HF como `tardellirs/ptbr-reranker-stage1b-control-bce`.
+
+**Resultado consolidado pós-4 tentativas:**
+
+| Variant | MRR@10 | Δ vs v0.1 | Loss family | Notas |
+|---|---|---|---|---|
+| v0.1 (release) | 0.2945 | — | BCE | 2M BM25 random |
+| v1.0 (10M data) | 0.2876 | -0.7pp | BCE | data scale saturou |
+| v1.x (IVFPQ HN) | 0.2159 | -7.9pp | BCE | mining PQ ruim |
+| v2.x (IVFFlat HN) | 0.1938 | -10.1pp | BCE | mining bom, qrels esparsos |
+| Stage 1b (200k MNRL) | 0.2511 *top-100* | -3pp top-100 | InfoNCE | 10% dados, listwise loss |
+
+**Quarta regressão consecutiva.** v0.1 é local optimum forte. Análise de erros em 11 queries falhadas de v0.1 (`outputs/v0.1_top1000/`): ~80% são erros reais do modelo, ~20% qrels deficientes. Há headroom em tese, mas não capturável dentro do budget restante ($9) com training conventional.
+
+**Consulta a Codex CLI (gpt-5.5 high reasoning) como segunda opinião crítica:**
+- P(BGE-reranker-v2-m3 > 0.32 em mMARCO-PT) ~25-35% (não há benchmark publicado direto).
+- P(distillation BGE 568M → Albertina 100M atingir >0.32) ~15-25% (gap de capacidade 5.7×).
+- Self-mining com v0.1 é circular (mina os próprios artefatos).
+- Para paper, v0.1 + análise rigorosa + negative results é publicável; não precisa SOTA se a história for forte.
+
+**Decisão final** (após reflexão crítica): **Stop training. Build the rest of the project.**
+
+Justificativa:
+- v0.1 já vence mMiniLM-en/multi-msmarco (0.2945 vs 0.277) e está a 1.1pp de ptT5-base/mMiniLM-en-pt-msmarco (0.299). É release-quality.
+- Bater mT5-base 0.306 com 100M params é improvável.
+- 4 tentativas pioraram → 5ª provavelmente também piora.
+- Quality battery (`tests/test_quality_*.py`), MIRACL-PT eval, Gradio Space, paper draft — todos planejados no projeto, todos pendentes, todos custo $0 ou marginal.
+- **Saldo $9 fica reservado pra hipótese específica se surgir do paper writing, não pra mais palpites.**
+
+**TODO:**
+- [x] Push Stage 1b + control models pra HF.
+- [x] Push Stage 1b eval top-100 results pra `tardellirs/ptbr-reranker-eval-results/stage1b_top100/`.
+- [x] Update experiments_log, results.md, lab_notebook com Stage 1b.
+- [x] Limpeza HF: deletado `stage1b-inprogress` (10GB liberados). Mining-cache (27GB) mantido pra futuro.
+- [x] Implementar `tests/test_quality_calibration.py`. Resultado: ECE 0.072 (passa <0.10), pos/neg mean separation 0.83, MAS overconfidence em high bins (bin 0.9-1.0 score 0.954 mas pos_rate só 2.3% — efeito de class imbalance BCE).
+- [x] Implementar `tests/test_quality_robustness.py`. 4/5 perturbações passam:
+   - case_lower 0% drop, abbreviations 0.8%, no_accent 1.8%, case_upper 3.2% (worst -82%) — todos OK
+   - **typos FAILS**: 22.8% drop médio. Modelo frágil a typos (BPE tokenizer + treino em texto limpo).
+- [ ] Eval em MIRACL-PT (cross-domain, ~$1-2).
+- [ ] Construir Gradio Space demo.
+- [ ] Paper draft com 4 negative results bem documentados.
+- [ ] Public release v1.0 com tudo polido.
+
+---
+
+## 2026-05-23 — v2.x (hard negatives, **IVFFlat** retrieval) — REGREDIU AINDA MAIS
+
+**Hipótese:** v1.x degradou porque IVFPQ comprimiu vetores 50× e o sampling em rank 10-100 amostrou ruído. v2.x repete tudo idêntico **trocando apenas o índice para IVFFlat-GPU** (sem compressão, recall ~perfeito na top-100). Se a hipótese estiver certa, v2.x recupera ≥ v0.1.
+
+**O que foi feito:**
+- Mineração no GPUhub 4090 48GB com `--index-type ivf_gpu`. Encoded 8.84M passagens via Serafim-IR streaming (memmap 27GB). FAISS IVFFlat-GPU clone com nprobe=93. Search chunked em 10k queries × 2.91M batches. Output: triples idênticas em formato a v1.x mas com vizinhos faithful.
+- Treino Albertina-100m no mesmo pod GPUhub 4090, 1 epoch, lr 2e-5. Train_runtime 8h08min, train_loss avg 0.336, final ~0.26. Curva monotônica decrescente (vs v1.x caótica).
+- Eval top-1000 mMARCO-PT dev no mesmo pod, batch_size 256, ~4h37min.
+
+**Resultado:**
+
+| | v0.1 (release) | v1.x (IVFPQ) | **v2.x (IVFFlat)** | Δ vs v0.1 |
+|---|---|---|---|---|
+| MRR@10 | **0.2945** | 0.2159 | **0.1938** | **-10.1 pp** |
+| nDCG@10 | **0.3437** | 0.2504 | **0.2234** | **-12.0 pp** |
+| MAP | 0.2980 | 0.2215 | 0.1998 | -9.8 |
+| Recall@100 | 0.7055 | 0.5892 | 0.5315 | -17.4 |
+| Recall@1000 | 0.7442 | 0.7442 | 0.7442 | 0 (BM25 ceiling) |
+| train_loss final | 0.127 | 0.140 | **0.260** | — |
+
+**Hipótese IVFPQ→ruído REFUTADA.** Com IVFFlat (vizinhos verdadeiros), v2.x piorou ainda mais que v1.x. O problema não é o índice — é o método de mining em si.
+
+**Diagnóstico revisado:**
+
+1. **Qrels esparsos.** mMARCO-PT tem ~1 positivo anotado por query em 8.84M passagens. Top-100 do Serafim-IR contém muitos *quase-duplicatas* do positivo (true positives sem anotação) — falsos negativos. Treinamos contra essa contradição.
+2. **Rank 10-100 está errado.** Para bi-encoder, rank 10-100 é "topicamente próximo". Para cross-encoder hard negs deveriam estar **rank 200-1000** (similar-mas-não-relevante) ou via bootstrap do próprio cross-encoder.
+3. **train_loss quase dobrou** (0.140→0.260): com retrieval faithful, os negs ficaram tão próximos dos positivos que o gradiente forçou over-correction em cada caso confusável, uniformemente prejudicando ranking.
+
+**Decisão:** PARAR iteração. Três variants regrediram (v1.0 -0.7, v1.x -7.9, v2.x -10.1). Custo cumulativo ~$30. v0.1 permanece release. v1.0+v1.x+v2.x ficam como ablations negativas paper-worthy (forte mensagem científica: "hard-neg mining via bi-encoder top-100 não funciona out-of-the-box em PT-BR pequeno encoder").
+
+**TODO:**
+- [x] Push v2.x final + eval results para HF Hub.
+- [x] Artefatos em `outputs/v2.x_top1000/` + `docs/paper_assets/v2.x/`.
+- [x] Update experiments_log + results.md + lab_notebook com v2.x.
+- [ ] Limpar `tardellirs/ptbr-reranker-v2x-inprogress` (libera ~28GB no HF).
+- [ ] Limpar `v2.x_top1000_inprogress/` do dataset HF (superseded por `v2.x_top1000/`).
+- [ ] Usuário: matar pod GPUhub no console (sem API).
+
+---
+
 ## 2026-05-22 — v1.x (hard negatives) — REGREDIU vs v0.1
 
 **Hipótese:** trocar BM25 random negatives por hard negatives minerados via Serafim-IR (rank 10-100, 7 negs/query) deveria render **+3-5 pp MRR@10** sobre v0.1 (canonical recipe ANCE/BGE).
